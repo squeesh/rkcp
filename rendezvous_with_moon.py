@@ -87,6 +87,7 @@ ORBIT_PROGRADE = 0
 ORBIT_RETROGRADE = 1
 SURFACE_PROGRADE = 2
 SURFACE_RETROGRADE = 3
+FIXED_UP = 4
 curr_follow = ORBIT_PROGRADE
 
 def set_state(new_state):
@@ -118,6 +119,9 @@ COAST_TO_BURN = 0
 MUN_BURN = 1
 ENROUTE_TO_MUN = 2
 MUN_DESCENT = 3
+SUICIDE_BURN = 4
+LAND = 5
+FIN = 99
 curr_state = MUN_DESCENT
 
 ut = conn.space_center.ut
@@ -126,7 +130,11 @@ def ut_callback(x):
     global ut
     ut = x
 
-    if curr_follow == ORBIT_PROGRADE:
+    if curr_follow == FIXED_UP:
+        vessel.auto_pilot.reference_frame = vessel.surface_reference_frame
+        vessel.auto_pilot.target_pitch_and_heading(90, 90)
+
+    elif curr_follow == ORBIT_PROGRADE:
         # orb_prograde, orb_heading = get_pitch_heading(flight.prograde)
         # vessel.auto_pilot.target_pitch_and_heading(orb_prograde, orb_heading)
         # vessel.auto_pilot.reference_frame = vessel.surface_velocity_reference_frame
@@ -163,8 +171,8 @@ vessel.control.rcs = False
 vessel.control.throttle = 0.0
 
 # Activate the first stage
-# vessel.auto_pilot.engage()
-# vessel.auto_pilot.target_roll = 0
+vessel.auto_pilot.engage()
+vessel.auto_pilot.target_roll = 0
 
 lines = []
 
@@ -420,20 +428,90 @@ def radius_direction(theta):
     # }
 
 
+def get_current_stage(vessel):
+    return max([part.stage for part in vessel.parts.all])
+
+
+def get_avail_thrust(vessel):
+    stage = get_current_stage(vessel)
+    stage_parts = vessel.parts.in_stage(stage)
+    return sum([part.engine.available_thrust for part in stage_parts if part.engine])
+
+
+def get_avail_twr(vessel):
+    stage = get_current_stage(vessel)
+    stage_parts = vessel.parts.in_stage(stage)
+    avail_thrust_for_stage = sum([part.engine.available_thrust for part in stage_parts if part.engine])
+    return avail_thrust_for_stage / (vessel.mass * get_local_gravity(vessel))
+
+
 def get_seconds_to_impact(vi, dst):
     m = vessel.mass
     r = vessel.orbit.radius
-    g = lambda: (G*(M+m)/r**2)
+    g = active_body.surface_gravity
 
     # v = vi + a*t
     # d = ((v + vi)/2)*t
     # v**2 = vi**2 + 2*a*d
     # t = (-vi + math.sqrt(vi**2 - 2*g()*-dst)) / g()
 
-    v = math.sqrt(vi**2 + 2*g()*dst)
+    v = math.sqrt(vi**2 + 2*g*dst)
 
     # print ((v-vi) / g()), '==', dst / ((v+vi)/2.0), '==', (-vi + math.sqrt(vi**2 - 2*g()*-dst)) / g()
-    return (v-vi) / g()
+    return (v-vi) / g
+
+
+def get_speed_after_time(vi, t):
+    m = vessel.mass
+    r = vessel.orbit.radius
+    g = active_body.surface_gravity
+
+    return vi + g * t
+
+
+# def get_distance_after_time(vi, t):
+#     vf = get_speed_after_time(vi, t)
+#     return (vi + vf) / 2 * t
+
+
+def get_time_for_distance(v, d):
+    return d/v
+
+
+def get_suicide_burn_time(vi, dist, use_local_g=False):
+    r = vessel.orbit.radius
+    mi = vessel.mass
+    isp = vessel.specific_impulse
+    if use_local_g:
+        g = (G * (M+mi) / r**2)
+    else:
+        g = active_body.surface_gravity
+    thrust = get_avail_thrust(vessel)
+
+    bottom = (thrust/(g*isp))
+    e_bit = (vi + math.sqrt(2*g*dist))/(g*isp)
+    top = (mi - (mi/math.exp(e_bit)))
+    return top / bottom
+
+
+
+
+def get_suicide_burn_alt(vi, dist, use_local_g=False):
+    r = vessel.orbit.radius
+    mi = vessel.mass
+    if use_local_g:
+        g = (G * (M+mi) / r**2)
+    else:
+        g = active_body.surface_gravity
+
+    thrust = get_avail_thrust(vessel) * 0.7
+    # print 't:', thrust, 'm:', vessel.mass, 't/m:', thrust/vessel.mass, 'm/t:', vessel.mass/thrust
+
+    accel = thrust/vessel.mass - g
+    # t = get_suicide_burn_time(vi, dist, use_local_g=use_local_g)
+
+    # return (vi + (math.sqrt(2 * g * dist) / 2)) * t
+    return (vi ** 2.0) / (2.0 * accel)
 
 
 def find_true_impact_time(vessel):
@@ -542,7 +620,7 @@ def find_true_impact_time(vessel):
     # print vessel.orbit.body.altitude_at_position(future_impact_pos, body_ref_frame)
     # print vessel.orbit.body.altitude_at_position(impact_pos, body_ref_frame)
 
-    print lat_lng_str(probe_lat, probe_lng), i
+    # print lat_lng_str(probe_lat, probe_lng), i
     x1, y1, z1 = active_body.surface_position(probe_lat, probe_lng, ref_frame)
     x2, y2, z2 = vessel.position(ref_frame)
 
@@ -559,6 +637,12 @@ ref_frame = vessel.orbital_reference_frame
 
 
 while True:
+    orb_flight = vessel.flight(active_body.non_rotating_reference_frame)
+    surf_flight = vessel.flight(active_body.reference_frame)
+
+    vi = math.fabs(orb_flight.speed)
+    alt = orb_flight.surface_altitude
+
     if curr_state == COAST_TO_BURN:
         mun_pos = mun.position(kerbin.non_rotating_reference_frame)
         ves_pos = vessel.position(kerbin.non_rotating_reference_frame)
@@ -610,6 +694,82 @@ while True:
             set_state(MUN_DESCENT)
     elif curr_state == MUN_DESCENT:
         curr_follow = SURFACE_RETROGRADE
+        cal_time_to_impact, cal_dist, cal_impact_pos, cal_impact_ref_frame = find_true_impact_time(vessel)
+
+        # we need to get the m/s at the time of the start of the suicide burn
+        vf = get_speed_after_time(surf_flight.speed, cal_time_to_impact)
+        impact_plus_1km = get_time_for_distance(vf, 1000)
+        # use that speed to make the suicide burn happen 100m higher
+
+        thrust = get_avail_thrust(vessel)
+        a = thrust - active_body.surface_gravity
+
+        print 'spd: ', surf_flight.speed
+        print 'vf:  ', vf
+        print 'imp: ', cal_time_to_impact
+        print '1km: ', impact_plus_1km
+        print 'dst: ', cal_dist
+        print 'sbt: ', get_suicide_burn_time(surf_flight.speed, cal_dist)
+        print 'alt: ', get_suicide_burn_alt(surf_flight.speed, cal_dist)
+
+        # suicide_burn_time = get_suicide_burn_time(vf, cal_dist)
+        # suicide_burn_start_time = ut + cal_time_to_impact - suicide_burn_time - impact_plus_1km
+        # suicide_burn_start_alt = get_suicide_burn_alt(vf, cal_dist)
+
+        set_state(SUICIDE_BURN)
+
+    elif curr_state == SUICIDE_BURN:
+        # curr_follow = SURFACE_RETROGRADE
+
+        if ray_time_to_impact > 0:
+            time_to_impact = ray_time_to_impact
+        else:
+            time_to_impact = cal_time_to_impact
+
+        if ray_dist != float('inf') and ray_dist > 0:
+            dist = ray_dist
+        else:
+            dist = 100000
+
+        # vf = get_speed_after_time(surf_flight.speed, time_to_impact)
+        impact_plus_1km = get_time_for_distance(surf_flight.speed, 1000)
+        # use that speed to make the suicide burn happen 100m higher
+
+        thrust = get_avail_thrust(vessel)
+        a = thrust - active_body.surface_gravity
+
+        # suicide_burn_time = get_suicide_burn_time(surf_flight.speed, dist, use_local_g=True)
+        # suicide_burn_start_time = ut + time_to_impact - suicide_burn_time #- impact_plus_1km
+        suicide_burn_start_alt = get_suicide_burn_alt(surf_flight.speed, dist, use_local_g=True)
+
+        # print ''
+        # print 'sp:', surf_flight.speed
+        # # print 'bt:', suicide_burn_time
+        # # print 'ut:', ut, 'bs:', suicide_burn_start_time
+        # print 'ba:', suicide_burn_start_alt, 'dist:', dist
+
+        if dist < suicide_burn_start_alt + 150:
+            if dist < suicide_burn_start_alt + 35:
+                if surf_flight.speed > 4.5:
+                    if suicide_burn_start_alt - dist > 0.5:
+                        vessel.control.throttle = 1.0
+                    else:
+                        vessel.control.throttle = 0.705
+                else:
+                    avail_twr = get_avail_twr(vessel)
+                    vessel.control.throttle = 0.95 / avail_twr
+                    curr_follow = FIXED_UP
+                    set_state(LAND)
+        else:
+            vessel.control.throttle = 0
+    elif curr_state == LAND:
+        if surf_flight.speed > 0.5:
+            avail_twr = get_avail_twr(vessel)
+            vessel.control.throttle = 0.9 / avail_twr
+        else:
+            vessel.control.throttle = 0
+        # vessel.auto_pilot.disengage()
+
 
 
     # sqrt ( 2 * height / 9.8 )
@@ -622,11 +782,7 @@ while True:
     # m is the mass of the falling body,
     # and r is the radius from the falling object to the center of the body.
 
-    orb_flight = vessel.flight(mun.non_rotating_reference_frame)
-    surf_flight = vessel.flight(mun.reference_frame)
 
-    vi = math.fabs(orb_flight.speed)
-    alt = orb_flight.surface_altitude
 
     # t = math.sqrt((2*d)/g)
     # t = math.sqrt((2*d)/(G*(M+m)/r**2))
@@ -676,9 +832,9 @@ while True:
     # print vi, '|', math.sqrt(2*g*d), '|', (d/t)
     # print (-2*vi / g)
 
-    cal_time_to_impact, cal_dist, cal_impact_pos, cal_impact_ref_frame = find_true_impact_time(vessel)
 
-    ray_dist = None
+
+    ray_dist = 0
     ray_time_to_impact = 0
     ray_impact_time = 0
     ray_impact_pos = None
@@ -686,12 +842,21 @@ while True:
     ray_lat = None
     ray_lng = None
 
+    if lines:
+        for line in lines:
+            line.remove()
+        lines = []
+
     if alt < 5000:
-        ray_ref_frame = cal_impact_ref_frame
         ray_dist = space_center.raycast_distance((0, 5, 0), (0, 1, 0), vessel.surface_velocity_reference_frame)
         ray_time_to_impact = get_seconds_to_impact(surf_flight.speed, ray_dist)
         if ray_time_to_impact != float('inf'):
             ray_impact_time = ut + ray_time_to_impact
+
+            body_rot = math.pi * ray_impact_time / vessel.orbit.body.rotational_period
+            ray_ref_frame = ReferenceFrame.create_relative(
+                active_body.reference_frame, rotation=(0, math.sin(body_rot), 0, math.cos(body_rot)))
+
             ray_impact_pos = vessel.orbit.position_at(ray_impact_time, ray_ref_frame)
             ray_aai = mun.altitude_at_position(ray_impact_pos, ray_ref_frame)
             ray_lat = mun.latitude_at_position(ray_impact_pos, ray_ref_frame)
@@ -701,86 +866,86 @@ while True:
             lines.append(conn.drawing.add_line((0, 5, 0), (0, 1, 0), vessel.surface_velocity_reference_frame))
             lines[-1].color = (0, 1.0, 0)
 
-            rel_ray_impact_pos = space_center.transform_position(ray_impact_pos, ray_ref_frame, mun.reference_frame)
-            rel_ray_impact_ref_frame = ReferenceFrame.create_relative(mun.reference_frame, position=rel_ray_impact_pos)
+            rel_ray_impact_pos = space_center.transform_position(ray_impact_pos, ray_ref_frame, active_body.reference_frame)
+            rel_ray_impact_ref_frame = ReferenceFrame.create_relative(active_body.reference_frame, position=rel_ray_impact_pos)
             rel_ray_vessel_pos = vessel.position(rel_ray_impact_ref_frame)
 
             lines.append(conn.drawing.add_line((0, 0, 0), rel_ray_vessel_pos, rel_ray_impact_ref_frame))
             lines[-1].color = (0, 0, 1)
 
 
-    # cal_dist = find_true_impact_time(vessel)
-    # cal_time_to_impact = get_seconds_to_impact(vi, cal_dist)
-
-    # cal_impact_time = ut + cal_time_to_impact
-    # cal_impact_pos = vessel.orbit.position_at(cal_impact_time, ref_frame)
-    cal_aai = mun.altitude_at_position(cal_impact_pos, cal_impact_ref_frame)
-    cal_lat = mun.latitude_at_position(cal_impact_pos, cal_impact_ref_frame)
-    cal_lng = mun.longitude_at_position(cal_impact_pos, cal_impact_ref_frame)
-
-    if lines:
-        for line in lines:
-            line.remove()
-        lines = []
-
-    vessel_pos = vessel.position(cal_impact_ref_frame)
-    # lines.append(conn.drawing.add_line(vessel_pos, impact_pos, ref_frame))
-    # lines[-1].color = (1.0, 0, 0)
-
-    # rel_impact_pos = space_center.transform_position(impact_pos, ref_frame, mun.reference_frame)
-    # rel_impact_ref_frame = ReferenceFrame.create_relative(mun.reference_frame, position=rel_impact_pos)
-    # rel_vessel_pos = vessel.position(rel_impact_ref_frame)
-
-    # lines.append(conn.drawing.add_line((0, 0, 0), rel_vessel_pos, rel_impact_ref_frame))
-    # lines[-1].color = (1, 0, 1)
-
-    # cal_ray_impact_pos = space_center.transform_position(ray_impact_pos, ref_frame, mun.reference_frame)
-    rel_cal_impact_pos = space_center.transform_position(cal_impact_pos, cal_impact_ref_frame, mun.reference_frame)
-    rel_cal_impact_ref_frame = ReferenceFrame.create_relative(mun.reference_frame, position=rel_cal_impact_pos)
-    rel_cal_vessel_pos = vessel.position(rel_cal_impact_ref_frame)
-
-    # Impact spot, to ship
-    lines.append(conn.drawing.add_line((0, 0, 0), rel_cal_vessel_pos, rel_cal_impact_ref_frame))
-    lines[-1].color = (0, 1, 1)
-
-    # Ship to impact spot
-    vessel_impact_pos = space_center.transform_position(cal_impact_pos, cal_impact_ref_frame, vessel.surface_velocity_reference_frame)
-    lines.append(conn.drawing.add_line((0, 0, 0), vessel_impact_pos, vessel.surface_velocity_reference_frame))
-    lines[-1].color = (1, 1, 0)
+    # # cal_dist = find_true_impact_time(vessel)
+    # # cal_time_to_impact = get_seconds_to_impact(vi, cal_dist)
+    #
+    # # cal_impact_time = ut + cal_time_to_impact
+    # # cal_impact_pos = vessel.orbit.position_at(cal_impact_time, ref_frame)
+    # cal_aai = mun.altitude_at_position(cal_impact_pos, cal_impact_ref_frame)
+    # cal_lat = mun.latitude_at_position(cal_impact_pos, cal_impact_ref_frame)
+    # cal_lng = mun.longitude_at_position(cal_impact_pos, cal_impact_ref_frame)
+    #
+    # if lines:
+    #     for line in lines:
+    #         line.remove()
+    #     lines = []
+    #
+    # vessel_pos = vessel.position(cal_impact_ref_frame)
+    # # lines.append(conn.drawing.add_line(vessel_pos, impact_pos, ref_frame))
+    # # lines[-1].color = (1.0, 0, 0)
+    #
+    # # rel_impact_pos = space_center.transform_position(impact_pos, ref_frame, mun.reference_frame)
+    # # rel_impact_ref_frame = ReferenceFrame.create_relative(mun.reference_frame, position=rel_impact_pos)
+    # # rel_vessel_pos = vessel.position(rel_impact_ref_frame)
+    #
+    # # lines.append(conn.drawing.add_line((0, 0, 0), rel_vessel_pos, rel_impact_ref_frame))
+    # # lines[-1].color = (1, 0, 1)
+    #
+    # # cal_ray_impact_pos = space_center.transform_position(ray_impact_pos, ref_frame, mun.reference_frame)
+    # rel_cal_impact_pos = space_center.transform_position(cal_impact_pos, cal_impact_ref_frame, mun.reference_frame)
+    # rel_cal_impact_ref_frame = ReferenceFrame.create_relative(mun.reference_frame, position=rel_cal_impact_pos)
+    # rel_cal_vessel_pos = vessel.position(rel_cal_impact_ref_frame)
+    #
+    # # Impact spot, to ship
+    # lines.append(conn.drawing.add_line((0, 0, 0), rel_cal_vessel_pos, rel_cal_impact_ref_frame))
+    # lines[-1].color = (0, 1, 1)
+    #
+    # # Ship to impact spot
+    # vessel_impact_pos = space_center.transform_position(cal_impact_pos, cal_impact_ref_frame, vessel.surface_velocity_reference_frame)
+    # lines.append(conn.drawing.add_line((0, 0, 0), vessel_impact_pos, vessel.surface_velocity_reference_frame))
+    # lines[-1].color = (1, 1, 0)
 
     # ves_imp_time = calc_impact_time(vessel)
+    #
+    # to_print = [
+    #     # # '',
+    #     # # 'vi: {} M: {} m: {} r: {} G: {}'.format(vi, M, m, r, G),
+    #     # # 'ut: {}'.format(ut),
+    #     # # 'vvl: {}'.format(vi),
+    #     # 'spd: {}'.format(surf_flight.speed),
+    #     # 'srf: {}'.format(surf_flight.surface_altitude),
+    #     # # 'alt: {}'.format(alt),
+    #     # 'cal: {}'.format(cal_dist),
+    #     # 'ray: {}'.format(ray_dist),
+    #     # # 'tst_tti: {} | {}'.format(ves_imp_time, to_min_sec_str(ves_imp_time)),
+    #     # # 'alt_tti: {} | {}'.format(time_to_impact, to_min_sec_str(time_to_impact)),
+    #     # 'cal_tti: {} | {}'.format(cal_time_to_impact, to_min_sec_str(cal_time_to_impact)),
+    #     # 'ray_tti: {} | {}'.format(ray_time_to_impact, to_min_sec_str(ray_time_to_impact if ray_time_to_impact != float('inf') else 0)),
+    #     # # 'alt_aai: {}'.format(mun.altitude_at_position(impact_pos, ref_frame)),
+    #     # 'cal_aai: {}'.format(cal_aai),
+    #     # 'ray_aai: {}'.format(ray_aai),
+    #     # # 'alt_sfc: {}'.format(mun.surface_height(alt_lat, alt_lng)),
+    #     # 'cal_sfc: {}'.format(mun.surface_height(cal_lat, cal_lng)),
+    #     # 'ray_sfc: {}'.format(mun.surface_height(ray_lat, ray_lng) if ray_lat else None),
+    #     # # 'alt_ll: {} | {}'.format(alt_lat, alt_lng),
+    #     # # 'ray_ll: {} | {}'.format(ray_lat, ray_lng),
+    #     #
+    #     # # str(speed_r1) + ' | ' + str(speed_r2) + ' | ' + str(speed_diff),
+    #     # # str(math.degrees(phase_rads)) + ' | ' + str(math.degrees(phase_rad_needed)) + ' | ' + str(dv_burn),
+    #     # # str(math.degrees(rad_to_burn)) + ' | ' + str(seconds_until_burn) + ' | ' + str(seconds_until_burn / 60.0),
+    #     # # str(burn_time) + ' | ' + str(ut()) + ' | ' + str(burn_until),
+    #     # # str(space_center.raycast_distance((0.0, -5.0, 0.0), (0, -1, 0), vessel.reference_frame))
+    #     '',
+    # ]
+    # print '\n'.join(to_print)
 
-    to_print = [
-        # '',
-        # 'vi: {} M: {} m: {} r: {} G: {}'.format(vi, M, m, r, G),
-        # 'ut: {}'.format(ut),
-        # 'vvl: {}'.format(vi),
-        'spd: {}'.format(surf_flight.speed),
-        'srf: {}'.format(surf_flight.surface_altitude),
-        # 'alt: {}'.format(alt),
-        'cal: {}'.format(cal_dist),
-        'ray: {}'.format(ray_dist),
-        # 'tst_tti: {} | {}'.format(ves_imp_time, to_min_sec_str(ves_imp_time)),
-        # 'alt_tti: {} | {}'.format(time_to_impact, to_min_sec_str(time_to_impact)),
-        'cal_tti: {} | {}'.format(cal_time_to_impact, to_min_sec_str(cal_time_to_impact)),
-        'ray_tti: {} | {}'.format(ray_time_to_impact, to_min_sec_str(ray_time_to_impact if ray_time_to_impact != float('inf') else 0)),
-        # 'alt_aai: {}'.format(mun.altitude_at_position(impact_pos, ref_frame)),
-        'cal_aai: {}'.format(cal_aai),
-        'ray_aai: {}'.format(ray_aai),
-        # 'alt_sfc: {}'.format(mun.surface_height(alt_lat, alt_lng)),
-        'cal_sfc: {}'.format(mun.surface_height(cal_lat, cal_lng)),
-        'ray_sfc: {}'.format(mun.surface_height(ray_lat, ray_lng) if ray_lat else None),
-        # 'alt_ll: {} | {}'.format(alt_lat, alt_lng),
-        # 'ray_ll: {} | {}'.format(ray_lat, ray_lng),
-
-        # str(speed_r1) + ' | ' + str(speed_r2) + ' | ' + str(speed_diff),
-        # str(math.degrees(phase_rads)) + ' | ' + str(math.degrees(phase_rad_needed)) + ' | ' + str(dv_burn),
-        # str(math.degrees(rad_to_burn)) + ' | ' + str(seconds_until_burn) + ' | ' + str(seconds_until_burn / 60.0),
-        # str(burn_time) + ' | ' + str(ut()) + ' | ' + str(burn_until),
-        # str(space_center.raycast_distance((0.0, -5.0, 0.0), (0, -1, 0), vessel.reference_frame))
-        '',
-    ]
-    print '\n'.join(to_print)
-
-    sleep(1)
+    # sleep(1)
 
