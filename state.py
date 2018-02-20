@@ -13,9 +13,13 @@ class State(object):
     def __init__(self):
         from controller import Controller
         self.ctrl = Controller.get()
+        self.init_state()
         self._thread = Thread(target=self.run, args=())
         self._thread.daemon = True
         self._thread.start()
+
+    def init_state(self):
+        pass
 
     def run(self):
 
@@ -29,8 +33,6 @@ class State(object):
 
 class AscentState(State):
     def run(self):
-        super(AscentState, self).run()
-
         vessel = self.ctrl.vessel
 
         vessel.control.throttle = 1.0
@@ -51,6 +53,8 @@ class AscentState(State):
                 print 'alt:', self.ctrl.altitude
                 print 'mach:', self.ctrl.mach
                 print 'follow:', self.ctrl.pitch_follow
+                print 'apoapsis:', self.ctrl.apoapsis_altitude
+                print 'periapsis:', self.ctrl.periapsis_altitude
 
                 i = 0
                 last_second = curr_second
@@ -108,4 +112,70 @@ class AscentState(State):
 
 
 class CoastToApoapsis(State):
-    pass
+    def init_state(self):
+        self.dv_circ_burn = get_dv_needed_for_circularization(self.ctrl)
+        self.burn_time_for_circle = get_burn_time_for_dv(self.dv_circ_burn, self.ctrl)
+        self.burn_start_time = self.ctrl.ut + self.ctrl.time_to_apoapsis - (self.burn_time_for_circle / 2.0)
+        self.burn_end_time = self.burn_start_time + self.burn_time_for_circle
+
+    def run(self):
+        self.ctrl.pitch_follow = PitchManager.ORBIT_PROGRADE
+        self.ctrl.vessel.auto_pilot.engage()
+        self.ctrl.vessel.auto_pilot.target_roll = 0
+
+        last_second = datetime.now().second
+        i = 0
+        while True:
+            i += 1
+            curr_second = datetime.now().second
+            if curr_second != last_second:
+                print
+                print 'tks:', i
+                print 'alt:', self.ctrl.altitude
+                print 'follow:', self.ctrl.pitch_follow
+                print 'apoapsis:', self.ctrl.apoapsis_altitude
+                print 'periapsis:', self.ctrl.periapsis_altitude
+                print 'dv:', self.dv_circ_burn
+                print 'bt:', self.burn_time_for_circle
+                print 'bs:', self.burn_start_time
+                print 'ut:', self.ctrl.ut
+                print 'be:', self.burn_end_time
+
+                i = 0
+                last_second = curr_second
+
+            # if self.ctrl.time_to_apoapsis > (90 + self.burn_time_for_circle / 2.0 - self.burn_time_for_circle * 0.1):
+            if self.ctrl.ut < self.burn_start_time - 15:
+                pass
+                # self.ctrl.space_center.rails_warp_factor = 3
+            # elif self.ctrl.time_to_apoapsis > (15 + self.burn_time_for_circle / 2.0 - self.burn_time_for_circle * 0.1):
+            elif self.ctrl.ut < self.burn_start_time:
+                pass
+                # self.ctrl.space_center.physics_warp_factor = 4
+            # elif self.ctrl.time_to_apoapsis > (self.burn_time_for_circle / 2.0 - self.burn_time_for_circle * 0.1):
+            elif self.burn_start_time < self.ctrl.ut < self.burn_end_time:
+                # self.ctrl.space_center.physics_warp_factor = 0
+                self.ctrl.set_throttle(1.0)
+            else:
+                self.ctrl.set_throttle(0.0)
+                # self.ctrl.vessel.control.rcs = False
+                self.ctrl.set_NextStateCls(Circularized)
+                break
+
+
+class Circularized(State):
+    def init_state(self):
+        pass
+
+    def run(self):
+        pass
+        # while True:
+        #     if self.burn_start_time < self.ctrl.ut < self.burn_end_time:
+        #         self.ctrl.space_center.physics_warp_factor = 0
+        #         self.ctrl.set_throttle(1.0)
+        #     else:
+        #         self.ctrl.set_throttle(0.0)
+        #         self.ctrl.vessel.control.rcs = False
+        #         self.ctrl.set_NextStateCls(Circularize)
+        #         break
+

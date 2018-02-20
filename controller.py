@@ -4,8 +4,8 @@ import krpc
 from datetime import datetime
 from collections import defaultdict
 
-from util import SingletonMixin, get_current_stage
-from state import AscentState
+from util import SingletonMixin, get_current_stage, get_current_decouple_stage
+from state import AscentState, CoastToApoapsis, Circularized
 from manager import CallbackManager, PitchManager, ThrottleManager
 
 
@@ -36,58 +36,63 @@ class Controller(SingletonMixin, object):
         self._altitude = self.connection.add_stream(getattr, self.vessel.flight(), 'mean_altitude')
         self._mach = self.connection.add_stream(getattr, self.vessel.flight(), 'mach')
         self._angle_of_attack = self.connection.add_stream(getattr, self.vessel.flight(), 'angle_of_attack')
+        self._mass = self.connection.add_stream(getattr, self.vessel, 'mass')
+        self._specific_impulse = self.connection.add_stream(getattr, self.vessel, 'specific_impulse')
+        self._available_thrust = self.connection.add_stream(getattr, self.vessel, 'available_thrust')
+
         self._time_to_apoapsis = self.connection.add_stream(getattr, self.orbit, 'time_to_apoapsis')
         self._apoapsis_altitude = self.connection.add_stream(getattr, self.orbit, 'apoapsis_altitude')
-        self._mass = self.connection.add_stream(getattr, self.vessel, 'mass')
+        self._periapsis_altitude = self.connection.add_stream(getattr, self.orbit, 'periapsis_altitude')
+        self._apoapsis = self.connection.add_stream(getattr, self.orbit, 'apoapsis')
+        self._periapsis = self.connection.add_stream(getattr, self.orbit, 'periapsis')
 
         self._surface_gravity = self.connection.add_stream(getattr, self.body, 'surface_gravity')
         self._equatorial_radius = self.connection.add_stream(getattr, self.body, 'equatorial_radius')
 
         self.current_stage = get_current_stage(self.vessel)
+        self.current_decouple_stage = get_current_decouple_stage(self.vessel)
 
         self._parts_in_stage = {
             'all': {},
             'engine': defaultdict(list),
         }
+        self._parts_in_decouple_stage = {
+            'all': {},
+            'engine': defaultdict(list),
+        }
         self._part_streams = defaultdict(dict)
 
-        max_stage = self.current_stage
-
-        for i in range(max_stage, 0, -1):
-            print 'stage: ', i
+        for i in range(self.current_stage, 0, -1):
             parts_in_stage = self.vessel.parts.in_stage(i)
             self._parts_in_stage['all'][i] = parts_in_stage
 
             for part in parts_in_stage:
                 if part.engine:
-                    # print part
                     self._parts_in_stage['engine'][i].append(part)
                     self._part_streams[part]['available_thrust'] = self.connection.add_stream(getattr, part.engine, 'available_thrust')
 
-        print self._parts_in_stage
-        #
-        #
-        # sleep(2)
-        # for part, part_data in self._part_streams.items():
-        #     print part, '|', self.get_available_thrust(part)
-        #     # print part, '|', part_data['available_thrust']()
-        #
-        # asdfasdf
+        for i in range(self.current_decouple_stage, 0, -1):
+            parts_in_decouple_stage = self.vessel.parts.in_decouple_stage(i)
+            self._parts_in_decouple_stage['all'][i] = parts_in_decouple_stage
+
+            for part in parts_in_decouple_stage:
+                if part.engine:
+                    self._parts_in_decouple_stage['engine'][i].append(part)
 
     def run(self):
-
-
         self.callback_manager = CallbackManager()
         self.pitch_manager = PitchManager()
         self.throttle_manager = ThrottleManager()
 
-        self.current_state = AscentState()
+        # self.current_state = AscentState()
+        self.current_state = CoastToApoapsis()
         while True:
             if not self.current_state._thread.isAlive():
                 NextStateCls = self.get_NextStateCls()
                 if NextStateCls is None:
                     break
                 self.set_NextStateCls(None)
+                print 'switch state to: ', NextStateCls
                 self.current_state = NextStateCls()
 
         sleep(5)
@@ -129,12 +134,32 @@ class Controller(SingletonMixin, object):
         return self._apoapsis_altitude()
 
     @property
+    def periapsis_altitude(self):
+        return self._periapsis_altitude()
+
+    @property
+    def apoapsis(self):
+        return self._apoapsis()
+
+    @property
+    def periapsis(self):
+        return self._periapsis()
+
+    @property
     def mass(self):
         return self._mass()
 
     @property
+    def specific_impulse(self):
+        return self._specific_impulse()
+
+    @property
     def surface_gravity(self):
         return self._surface_gravity()
+
+    @property
+    def available_thrust(self):
+        return self._available_thrust()
 
     @property
     def equatorial_radius(self):
@@ -155,6 +180,9 @@ class Controller(SingletonMixin, object):
         #     self._parts_in_stage[stage_num][] = stage_parts
         #
         # return stage_parts
+
+    def get_parts_in_decouple_stage(self, stage_num, part_type='all'):
+        return self._parts_in_decouple_stage[part_type][stage_num]
 
     def get_available_thrust(self, part):
         # part_data = self._part_streams.get(part, {'available_thrust': lambda: None})

@@ -49,6 +49,10 @@ def get_current_stage(vessel):
     return max([part.stage for part in vessel.parts.all])
 
 
+def get_current_decouple_stage(vessel):
+    return max([part.decouple_stage for part in vessel.parts.all])
+
+
 def get_local_gravity(ctrl=None):
     if not ctrl:
         from controller import Controller
@@ -63,11 +67,12 @@ def get_avail_twr(ctrl=None):
     if not ctrl:
         from controller import Controller
         ctrl = Controller.get()
-    stage = ctrl.current_stage
+    # stage = ctrl.current_stage
     # stage_parts = ctrl.get_parts_in_stage(stage)
-    engines_in_stage = ctrl.get_parts_in_stage(stage, 'engine')
-    avail_thrust_for_stage = sum([ctrl.get_available_thrust(part) for part in engines_in_stage])
-    return avail_thrust_for_stage / (ctrl.mass * get_local_gravity(ctrl))
+    # engines_in_stage = ctrl.get_parts_in_stage(stage, 'engine')
+    # avail_thrust_for_stage = sum([ctrl.get_available_thrust(part) for part in engines_in_stage])
+    # avail_thrust = ctrl.available_thrust
+    return ctrl.available_thrust / (ctrl.mass * get_local_gravity(ctrl))
 
 
 def get_twr():
@@ -88,28 +93,36 @@ def get_pitch_heading(direction):
     return ptch, hdg
 
 
-def get_dv_needed_for_circularization(vessel):
+def get_dv_needed_for_circularization(ctrl=None):
+    if not ctrl:
+        from controller import Controller
+        ctrl = Controller.get()
+
     # r_ap = current apoapsis radius in meters (and the altitude you will circularize at)
-    r_ap = vessel.orbit.apoapsis
+    r_ap = ctrl.apoapsis
     # r_pe = current periapsis radius in meters
-    r_pe = vessel.orbit.periapsis
+    r_pe = ctrl.periapsis
     # mu = gravitational parameter for the body you are orbiting (3.5316x1012 m3 / s2 for Kerbin)
-    mu = vessel.orbit.body.gravitational_parameter
+    mu = ctrl.vessel.orbit.body.gravitational_parameter
     # dv_circ_burn = sqrt(mu / r_ap) - sqrt((r_pe * mu) / (r_ap * (r_pe + r_ap) / 2))
-    return math.sqrt(mu / r_ap) - math.sqrt((r_pe * mu) / (r_ap * (r_pe + r_ap) / 2))
+    return math.sqrt(mu / r_ap) - math.sqrt((r_pe * mu) / (r_ap * (r_pe + r_ap) / 2.0))
 
 
-def get_burn_time_for_dv(dv, vessel):
-    minit = vessel.mass
-    isp = vessel.specific_impulse
-    g0 = vessel.orbit.body.surface_gravity
+def get_burn_time_for_dv(dv, ctrl=None):
+    if not ctrl:
+        from controller import Controller
+        ctrl = Controller.get()
+
+    m_i = ctrl.mass
+    isp = ctrl.specific_impulse
+    f = ctrl.available_thrust
+    g = ctrl.surface_gravity
 
     if isp > 0.0:
-        mfinal = minit * math.exp(-dv / (isp * g0))
-        mpropellent = minit - mfinal
-        mdot = vessel.available_thrust / (isp * g0)
-        if mdot > 0.0:
-            return mpropellent / mdot
+        m_f = m_i / math.exp(dv / (isp * g))
+        flow_rate = f / (isp * g)
+        if flow_rate > 0.0:
+            return (m_i - m_f) / flow_rate
 
     return 999999
 
