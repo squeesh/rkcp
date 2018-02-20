@@ -634,7 +634,8 @@ print_twr = False
 # warp = True
 draw = True
 ref_frame = vessel.orbital_reference_frame
-
+ray_time_to_impact = 0
+cal_time_to_impact = 0
 
 while True:
     orb_flight = vessel.flight(active_body.non_rotating_reference_frame)
@@ -675,11 +676,15 @@ while True:
 
         seconds_until_burn = math.fabs(rad_to_burn / speed_diff)
 
-        if seconds_until_burn > 10:
+        print 'bt: ', burn_time
+        print 'ub: ', seconds_until_burn
+
+        if seconds_until_burn > 25:
             space_center.rails_warp_factor = 3
-        elif seconds_until_burn > 5:
+        elif seconds_until_burn > 10:
             space_center.rails_warp_factor = 0
         else:
+
             burn_until = ut + burn_time
             vessel.control.throttle = 1.0
             set_state(MUN_BURN)
@@ -690,7 +695,6 @@ while True:
             set_state(ENROUTE_TO_MUN)
     elif curr_state == ENROUTE_TO_MUN:
         if ut >= time_to_enter_mun_soi:
-
             set_state(MUN_DESCENT)
     elif curr_state == MUN_DESCENT:
         curr_follow = SURFACE_RETROGRADE
@@ -698,7 +702,7 @@ while True:
 
         # we need to get the m/s at the time of the start of the suicide burn
         vf = get_speed_after_time(surf_flight.speed, cal_time_to_impact)
-        impact_plus_1km = get_time_for_distance(vf, 1000)
+        # impact_plus_1km = get_time_for_distance(vf, 1000)
         # use that speed to make the suicide burn happen 100m higher
 
         thrust = get_avail_thrust(vessel)
@@ -707,7 +711,7 @@ while True:
         print 'spd: ', surf_flight.speed
         print 'vf:  ', vf
         print 'imp: ', cal_time_to_impact
-        print '1km: ', impact_plus_1km
+        # print '1km: ', impact_plus_1km
         print 'dst: ', cal_dist
         print 'sbt: ', get_suicide_burn_time(surf_flight.speed, cal_dist)
         print 'alt: ', get_suicide_burn_alt(surf_flight.speed, cal_dist)
@@ -729,10 +733,10 @@ while True:
         if ray_dist != float('inf') and ray_dist > 0:
             dist = ray_dist
         else:
-            dist = 100000
+            dist = cal_dist
 
         # vf = get_speed_after_time(surf_flight.speed, time_to_impact)
-        impact_plus_1km = get_time_for_distance(surf_flight.speed, 1000)
+        # impact_plus_1km = get_time_for_distance(surf_flight.speed, 1000)
         # use that speed to make the suicide burn happen 100m higher
 
         thrust = get_avail_thrust(vessel)
@@ -742,28 +746,28 @@ while True:
         # suicide_burn_start_time = ut + time_to_impact - suicide_burn_time #- impact_plus_1km
         suicide_burn_start_alt = get_suicide_burn_alt(surf_flight.speed, dist, use_local_g=True)
 
-        # print ''
-        # print 'sp:', surf_flight.speed
-        # # print 'bt:', suicide_burn_time
-        # # print 'ut:', ut, 'bs:', suicide_burn_start_time
-        # print 'ba:', suicide_burn_start_alt, 'dist:', dist
+        print ''
+        print 'sp:', surf_flight.speed
+        # print 'bt:', suicide_burn_time
+        # print 'ut:', ut, 'bs:', suicide_burn_start_time
+        print 'ba:', suicide_burn_start_alt, 'dist:', dist
 
         if dist < suicide_burn_start_alt + 150:
-            if dist < suicide_burn_start_alt + 35:
-                if surf_flight.speed > 4.5:
+            if dist < suicide_burn_start_alt:
+                if surf_flight.vertical_speed < -5.0:
                     if suicide_burn_start_alt - dist > 0.5:
                         vessel.control.throttle = 1.0
                     else:
                         vessel.control.throttle = 0.705
                 else:
                     avail_twr = get_avail_twr(vessel)
-                    vessel.control.throttle = 0.95 / avail_twr
+                    vessel.control.throttle = 0.85 / avail_twr
                     curr_follow = FIXED_UP
                     set_state(LAND)
         else:
             vessel.control.throttle = 0
     elif curr_state == LAND:
-        if surf_flight.speed > 0.5:
+        if surf_flight.vertical_speed < -1.0:
             avail_twr = get_avail_twr(vessel)
             vessel.control.throttle = 0.9 / avail_twr
         else:
@@ -900,15 +904,15 @@ while True:
     # # lines[-1].color = (1, 0, 1)
     #
     # # cal_ray_impact_pos = space_center.transform_position(ray_impact_pos, ref_frame, mun.reference_frame)
-    # rel_cal_impact_pos = space_center.transform_position(cal_impact_pos, cal_impact_ref_frame, mun.reference_frame)
-    # rel_cal_impact_ref_frame = ReferenceFrame.create_relative(mun.reference_frame, position=rel_cal_impact_pos)
-    # rel_cal_vessel_pos = vessel.position(rel_cal_impact_ref_frame)
+    rel_cal_impact_pos = space_center.transform_position(cal_impact_pos, cal_impact_ref_frame, mun.reference_frame)
+    rel_cal_impact_ref_frame = ReferenceFrame.create_relative(mun.reference_frame, position=rel_cal_impact_pos)
+    rel_cal_vessel_pos = vessel.position(rel_cal_impact_ref_frame)
     #
-    # # Impact spot, to ship
-    # lines.append(conn.drawing.add_line((0, 0, 0), rel_cal_vessel_pos, rel_cal_impact_ref_frame))
-    # lines[-1].color = (0, 1, 1)
+    # Impact spot, to ship
+    lines.append(conn.drawing.add_line((0, 0, 0), rel_cal_vessel_pos, rel_cal_impact_ref_frame))
+    lines[-1].color = (0, 1, 1)
     #
-    # # Ship to impact spot
+    # Ship to impact spot
     # vessel_impact_pos = space_center.transform_position(cal_impact_pos, cal_impact_ref_frame, vessel.surface_velocity_reference_frame)
     # lines.append(conn.drawing.add_line((0, 0, 0), vessel_impact_pos, vessel.surface_velocity_reference_frame))
     # lines[-1].color = (1, 1, 0)
