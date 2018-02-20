@@ -1,0 +1,65 @@
+# Compiled source #
+###################
+*.com
+*.class
+*.dll
+*.exe
+*.o
+*.so
+*.pyc
+
+# Shell Scripts #
+#################
+*.sh
+
+# Packages #
+############
+# it's better to unpack these files and commit the raw source
+# git has its own built in compression methods
+*.7z
+*.dmg
+# *.gz
+*.iso
+*.jar
+*.rar
+*.tar
+*.zip
+
+# Logs and databases #
+######################
+*.log
+*.sqlite
+
+# OS generated files #
+######################
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+## sublime project files ##
+*.sublime-*
+
+media/uploads/
+media/comp_imgserve/
+media/corp_image/
+media/thumbs/
+media/img/uploads/
+media/loyalty/
+
+# Remove once code is ready...
+core/sql/*.sql
+
+# local settings file
+local_settings.py
+localhost_settings.py
+
+#Pycharm
+.idea/
+
+# Migrations
+v4_to_v5_migration.sh
+
