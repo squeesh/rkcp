@@ -31,17 +31,12 @@ class SingletonMixin(object):
 
     @classmethod
     def get(cls):
-        print 'get in: {} | {} | {}'.format(cls, cls.__singleton_lock, cls.__singleton_instance)
+        print 'getting: {}'.format(cls.__singleton_instance)
         if cls.__singleton_instance is None:
             with cls.__singleton_lock:
                 if cls.__singleton_instance is None:
-                    print 'starting...'
                     cls.__singleton_instance = cls()
-                    # t = Thread(target=lambda: cls.__singleton_instance.start())
-                    # t.daemon = True
-                    # t.start()
 
-        print 'get out: {} | {} | {}'.format(cls, cls.__singleton_lock, cls.__singleton_instance)
         return cls.__singleton_instance
 
 
@@ -67,21 +62,14 @@ def get_avail_twr(ctrl=None):
     if not ctrl:
         from controller import Controller
         ctrl = Controller.get()
-    # stage = ctrl.current_stage
-    # stage_parts = ctrl.get_parts_in_stage(stage)
-    # engines_in_stage = ctrl.get_parts_in_stage(stage, 'engine')
-    # avail_thrust_for_stage = sum([ctrl.get_available_thrust(part) for part in engines_in_stage])
-    # avail_thrust = ctrl.available_thrust
     return ctrl.available_thrust / (ctrl.mass * get_local_gravity(ctrl))
 
 
-def get_twr():
-    from controller import Controller
-    ctrl = Controller.get()
-    stage = ctrl.current_stage
-    stage_parts = ctrl.vessel.parts.in_stage(stage)
-    thrust_for_stage = sum([part.engine.thrust for part in stage_parts if part.engine])
-    return thrust_for_stage / (ctrl.vessel.mass * get_local_gravity())
+def get_twr(ctrl=None):
+    if not ctrl:
+        from controller import Controller
+        ctrl = Controller.get()
+    return ctrl.thrust / (ctrl.vessel.mass * get_local_gravity())
 
 
 def get_pitch_heading(direction):

@@ -50,6 +50,7 @@ class AscentState(State):
             if curr_second != last_second:
                 print
                 print 'tks:', i
+                print 'stms:', self.ctrl._streams_open
                 print 'alt:', self.ctrl.altitude
                 print 'mach:', self.ctrl.mach
                 print 'follow:', self.ctrl.pitch_follow
@@ -105,18 +106,29 @@ class AscentState(State):
                     self.ctrl.set_throttle(0.25)
             else:
                 self.ctrl.set_throttle(0)
-                # dv_circ_burn = get_dv_needed_for_circularization(vessel)
-                # burn_needed_for_circle = get_burn_time_for_dv(dv_circ_burn, vessel)
-                self.ctrl.set_NextStateCls(CoastToApoapsis)
-                break
+
+                if self.ctrl.altitude > 70000:
+                    dv_circ_burn = get_dv_needed_for_circularization(self.ctrl)
+                    # burn_time_for_circle = get_burn_time_for_dv(dv_circ_burn, self.ctrl)
+                    # burn_start_time = self.ctrl.ut + self.ctrl.time_to_apoapsis - (burn_time_for_circle / 2.0)
+                    print 'dv needed: {}'.format(dv_circ_burn)
+                    self.ctrl.set_burn_dv(dv_circ_burn)
+                    print 'burn point: {}',format(self.ctrl.ut + self.ctrl.time_to_apoapsis)
+                    self.ctrl.set_burn_point(self.ctrl.ut + self.ctrl.time_to_apoapsis)
+                    print 'ut:         {}'.format(self.ctrl.ut)
+                    print 'burn start: {}'.format(self.ctrl.get_burn_start())
+                    print 'burn time: {}'.format(self.ctrl.get_burn_time())
+                    self.ctrl.space_center.warp_to(self.ctrl.get_burn_start() - 20)
+                    self.ctrl.set_NextStateCls(CoastToApoapsis)
+                    break
 
 
 class CoastToApoapsis(State):
-    def init_state(self):
-        self.dv_circ_burn = get_dv_needed_for_circularization(self.ctrl)
-        self.burn_time_for_circle = get_burn_time_for_dv(self.dv_circ_burn, self.ctrl)
-        self.burn_start_time = self.ctrl.ut + self.ctrl.time_to_apoapsis - (self.burn_time_for_circle / 2.0)
-        self.burn_end_time = self.burn_start_time + self.burn_time_for_circle
+    # def init_state(self):
+    #     self.dv_circ_burn = get_dv_needed_for_circularization(self.ctrl)
+    #     self.burn_time_for_circle = get_burn_time_for_dv(self.dv_circ_burn, self.ctrl)
+    #     self.burn_start_time = self.ctrl.ut + self.ctrl.time_to_apoapsis - (self.burn_time_for_circle / 2.0)
+    #     self.burn_end_time = self.burn_start_time + self.burn_time_for_circle
 
     def run(self):
         self.ctrl.pitch_follow = PitchManager.ORBIT_PROGRADE
@@ -125,6 +137,8 @@ class CoastToApoapsis(State):
 
         last_second = datetime.now().second
         i = 0
+
+        burn_start_time = self.ctrl.get_burn_start()
         while True:
             i += 1
             curr_second = datetime.now().second
@@ -135,35 +149,39 @@ class CoastToApoapsis(State):
                 print 'follow:', self.ctrl.pitch_follow
                 print 'apoapsis:', self.ctrl.apoapsis_altitude
                 print 'periapsis:', self.ctrl.periapsis_altitude
-                print 'dv:', self.dv_circ_burn
-                print 'bt:', self.burn_time_for_circle
-                print 'bs:', self.burn_start_time
+                print 'dv:', self.ctrl.get_burn_dv()
+                print 'bt:', self.ctrl.get_burn_time()
+                print 'bs:', self.ctrl.get_burn_start()
                 print 'ut:', self.ctrl.ut
-                print 'be:', self.burn_end_time
+                # print 'be:', self.burn_end_time
 
                 i = 0
                 last_second = curr_second
 
+
+
             # if self.ctrl.time_to_apoapsis > (90 + self.burn_time_for_circle / 2.0 - self.burn_time_for_circle * 0.1):
-            if self.ctrl.ut < self.burn_start_time - 15:
+            if self.ctrl.ut < burn_start_time - 15:
                 pass
                 # self.ctrl.space_center.rails_warp_factor = 3
             # elif self.ctrl.time_to_apoapsis > (15 + self.burn_time_for_circle / 2.0 - self.burn_time_for_circle * 0.1):
-            elif self.ctrl.ut < self.burn_start_time:
+            elif self.ctrl.ut < burn_start_time:
                 pass
                 # self.ctrl.space_center.physics_warp_factor = 4
             # elif self.ctrl.time_to_apoapsis > (self.burn_time_for_circle / 2.0 - self.burn_time_for_circle * 0.1):
-            elif self.burn_start_time < self.ctrl.ut < self.burn_end_time:
+            # elif self.ctrl.burn_manager.burning:
                 # self.ctrl.space_center.physics_warp_factor = 0
-                self.ctrl.set_throttle(1.0)
+                # self.ctrl.set_throttle(1.0)
+                # pass
             else:
-                self.ctrl.set_throttle(0.0)
+                sleep(self.ctrl.get_burn_time() + 5)
+                # self.ctrl.set_throttle(0.0)
                 # self.ctrl.vessel.control.rcs = False
-                self.ctrl.set_NextStateCls(Circularized)
+                self.ctrl.set_NextStateCls(InOrbit)
                 break
 
 
-class Circularized(State):
+class InOrbit(State):
     def init_state(self):
         pass
 

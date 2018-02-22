@@ -122,7 +122,7 @@ MUN_DESCENT = 3
 SUICIDE_BURN = 4
 LAND = 5
 FIN = 99
-curr_state = MUN_DESCENT
+curr_state = COAST_TO_BURN
 
 ut = conn.space_center.ut
 
@@ -492,8 +492,6 @@ def get_suicide_burn_time(vi, dist, use_local_g=False):
     e_bit = (vi + math.sqrt(2*g*dist))/(g*isp)
     top = (mi - (mi/math.exp(e_bit)))
     return top / bottom
-
-
 
 
 def get_suicide_burn_alt(vi, dist, use_local_g=False):

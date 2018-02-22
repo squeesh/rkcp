@@ -2,6 +2,7 @@ from threading import Thread
 from collections import defaultdict
 from datetime import datetime
 import math
+from time import sleep
 
 
 class CallbackManager(object):
@@ -79,7 +80,7 @@ class ThrottleManager(object):
 
     def run(self):
         while True:
-            if math.fabs(self._throttle - self._old_throttle) > 0.01:
+            if math.fabs(self._throttle - self._old_throttle) > 0.001:
                 self.ctrl.vessel.control.throttle = self._throttle
                 self._old_throttle = self._throttle
 
@@ -87,7 +88,178 @@ class ThrottleManager(object):
         return self._throttle
 
     def set_throttle(self, val):
-        # # if self._throttle != val:
-        # if math.fabs(self._throttle - val) > 0.01:
         self._throttle = val
-            # self.ctrl.vessel.control.throttle = val
+
+
+class BurnManager(object):
+    _burn_dv = None
+    _burn_times = []
+    _burn_point = None
+    _burn_start = None
+
+    burning = False
+
+    def __init__(self):
+        from controller import Controller
+        self.ctrl = Controller.get()
+        self._thread = Thread(target=self.run)
+        self._thread.daemon = True
+        self._thread.start()
+
+    # dv_circ_burn = get_dv_needed_for_circularization(self.ctrl)
+    # burn_time_for_circle = get_burn_time_for_dv(dv_circ_burn, self.ctrl)
+    # burn_start_time = self.ctrl.ut + self.ctrl.time_to_apoapsis - (burn_time_for_circle / 2.0)
+
+    def run(self):
+        conn = self.ctrl.connection
+        ut_call = conn.get_call(getattr, conn.space_center, 'ut')
+        # Create an expression on the server
+
+        while True:
+            if self._burn_start is not None and self._burn_times and self.ctrl.ut > self._burn_start:
+                self.burning = True
+                self.ctrl.set_throttle(1.0)
+
+                burn_until = self.ctrl.ut + self._burn_times[0]
+                if len(self._burn_times) > 1:
+                    burn_until += 0.25
+
+                expr = conn.krpc.Expression.greater_than(
+                    conn.krpc.Expression.call(ut_call),
+                    conn.krpc.Expression.constant_double(burn_until))
+
+                # Create an event from the expression
+                event = conn.krpc.add_event(expr)
+
+                # Wait on the event
+                with event.condition:
+                    event.wait()
+                    # print 'Altitude reached 1000m'
+
+                # sleep(self._burn_times[0])
+                self.ctrl.set_throttle(0.0)
+                sleep(0.25)
+                self._burn_times = self._burn_times[1:]
+                if len(self._burn_times):
+                    self.ctrl.vessel.control.activate_next_stage()
+                    sleep(0.5)
+                else:
+                    self.burning = False
+                    self._burn_dv = None
+                    self._burn_times = []
+                    self._burn_point = None
+                    self._burn_start = None
+
+    def set_burn_dv(self, val):
+        self._burn_dv = val
+        self._burn_times = self.get_burn_times(val)
+        if self._burn_times and self._burn_point is not None:
+            self._burn_start = self._burn_point - self.get_burn_time() / 2.0 + 2.5
+
+    def set_burn_point(self, val):
+        self._burn_point = val
+        if self._burn_times and self._burn_point is not None:
+            print 'ut= {} | bp= {}'.format(self.ctrl.ut, self._burn_point)
+            self._burn_start = self._burn_point - self.get_burn_time() / 2.0 + 2.5
+
+    def get_dv_in_decouple_stage(self, decouple_stage):
+        g = 9.8
+
+        engines_in_decouple_stage = self.ctrl.get_parts_in_decouple_stage(decouple_stage, 'engine')
+        engine_stages = [part.stage for part in engines_in_decouple_stage]
+        engines = []
+        for stage in engine_stages:
+            engines.extend(self.ctrl.get_parts_in_stage(stage, 'engine'))
+
+        # total_thrust = sum([part.engine.max_thrust for part in engines])
+        # isp = 0
+        # for part in engines:
+        #     engine_contrib = part.engine.max_thrust / total_thrust
+        #     isp += part.engine.vacuum_specific_impulse * engine_contrib
+
+        isp = self.ctrl.get_isp_for_engines(engines)
+
+        # resources_in_decouple_stage = self.ctrl.vessel \
+        #     .resources_in_decouple_stage(decouple_stage, cumulative=False)
+        #
+        # liquid_fuel_in_stage = resources_in_decouple_stage.amount('LiquidFuel')
+        # oxidizer_in_stage = resources_in_decouple_stage.amount('Oxidizer')
+        # fuel_mass_in_stage = liquid_fuel_in_stage + oxidizer_in_stage
+
+        fuel_mass_in_stage = self.ctrl.get_resource_mass_for_decouple_stage(decouple_stage)
+
+        # all_stage_parts = self.ctrl.all_parts_after_stage(decouple_stage)
+        # for sub_decouple_stage in range(decouple_stage, -2, -1):
+        #     all_stage_parts.extend(self.ctrl.get_parts_in_decouple_stage(sub_decouple_stage))
+
+        # all_stage_mass = sum([part.mass for part in self.ctrl.all_parts_after_stage(decouple_stage)])
+
+        # m_i = self.ctrl.mass
+        m_i = sum([part.mass for part in self.ctrl.all_parts_after_decouple_stage(decouple_stage)])
+        m_f = m_i - fuel_mass_in_stage
+
+        # # print 'thrust: ', total_thrust
+        # print 'dcp: ', decouple_stage
+        # print 'isp: ', isp
+        # print 'fuel mass: ', fuel_mass_in_stage
+        # print 'ship mass: ', m_i
+        # print 'final mass: ', m_f
+
+        return math.log(m_i / m_f) * isp * g
+
+    def get_burn_times(self, dv, decouple_stage=None):
+        if decouple_stage is None:
+            decouple_stage = self.ctrl.current_decouple_stage
+
+        def get_burn_time_for_decouple_stage(current_dv, current_decouple_stage):
+            # print 'cdv: ', current_dv, '|', current_decouple_stage
+            engines_in_decouple_stage = self.ctrl.get_parts_in_decouple_stage(current_decouple_stage, 'engine')
+
+            engine_stages = [part.stage for part in engines_in_decouple_stage]
+
+            engines = []
+            for stage in engine_stages:
+                engines.extend(self.ctrl.get_parts_in_stage(stage, 'engine'))
+
+            isp = self.ctrl.get_isp_for_engines(engines)
+            m_i = sum([part.mass for part in self.ctrl.all_parts_after_decouple_stage(current_decouple_stage)])
+            print '--mass: {} | {}'.format(self.ctrl.mass, m_i)
+            # isp = self.ctrl.specific_impulse
+            # f = self.ctrl.available_thrust
+            f = self.ctrl.get_thrust_for_engines(engines)
+            g = 9.8  # This is a constant, not -> self.ctrl.surface_gravity
+
+            if isp > 0.0:
+                m_f = m_i / math.exp(current_dv / (isp * g))
+                flow_rate = f / (isp * g)
+                if flow_rate > 0.0:
+                    return (m_i - m_f) / flow_rate
+
+            return None
+
+        burn_times = []
+        c_dv = dv
+        for c_ds in range(decouple_stage, -2, -1):
+            d_ds = self.get_dv_in_decouple_stage(c_ds)
+            print 'c_ds: {} c_dv: {} d_ds: {}'.format(c_ds, c_dv, d_ds)
+            if c_dv > d_ds:
+                burn_times.append(get_burn_time_for_decouple_stage(d_ds, c_ds))
+                c_dv -= d_ds
+            else:
+                burn_times.append(get_burn_time_for_decouple_stage(c_dv, c_ds))
+                break
+
+        # hack ... bug is putting Nones into the array... remove them
+        burn_times = [time for time in burn_times if time is not None]
+        print 'burn_times: {}'.format(burn_times)
+        return burn_times
+
+    def get_burn_dv(self):
+        return self._burn_dv
+
+    def get_burn_start(self):
+        return self._burn_start
+
+    def get_burn_time(self):
+        print 'bt= {}'.format(self._burn_times)
+        return sum(self._burn_times) + ((len(self._burn_times) - 1) * 0.5)

@@ -7,22 +7,20 @@ decouple_stage_activate_next = {}
 
 
 def has_fuel_callback(has_fuel):
-    # pass
-    #
-    print 'fuel: {}'.format(has_fuel)
-    #
-    # print 'fut: {}'.format(ctrl.ut)
+    from controller import Controller
+    ctrl = Controller.get()
 
-    if not has_fuel:
+    if not has_fuel and not ctrl.burn_manager.burning:
+        print 'fuel lock... {}'.format(has_fuel)
         with fuel_lock:
-            from controller import Controller
+            print 'IN LOCK'
             from util import get_current_stage, get_current_decouple_stage
-            ctrl = Controller.get()
             # vessel = ctrl.vessel
             # max_decouple_stage = max([part.decouple_stage for part in vessel.parts.all])
             # current_decouple_stage = ctrl.current_decouple_stage
             # engines_to_decouple = [part for part in vessel.parts.in_decouple_stage(max_decouple_stage) if part.engine]
-            engines_to_decouple = ctrl.get_parts_in_decouple_stage(vessel)
+            engines_to_decouple = ctrl.get_parts_in_decouple_stage(ctrl.current_decouple_stage, 'engine')
+            print 'to decouple: ', engines_to_decouple
 
             # stage = get_current_stage(vessel)
             # stage_parts = vessel.parts.in_stage(stage)
