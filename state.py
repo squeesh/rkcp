@@ -14,17 +14,20 @@ class State(object):
         from controller import Controller
         self.ctrl = Controller.get()
         self.init_state()
-        self._thread = Thread(target=self.run, args=())
+        self._thread = Thread(target=self._run, args=())
         self._thread.daemon = True
         self._thread.start()
 
     def init_state(self):
         pass
 
-    def run(self):
+    def _run(self):
+        self.ctrl.state_condition.acquire()
+        self.run()
+        self.ctrl.state_condition.notify()
+        self.ctrl.state_condition.release()
 
-        # print self.__class__
-        # sleep(2)
+    def run(self):
         pass
 
     def join(self):
@@ -32,6 +35,9 @@ class State(object):
 
 
 class AscentState(State):
+    ALTITUDE_TURN_START = 250
+    ALTITUDE_TARGET = 175000
+
     def run(self):
         vessel = self.ctrl.vessel
 
@@ -41,6 +47,26 @@ class AscentState(State):
         vessel.auto_pilot.target_roll = 0
 
         self.ctrl.activate_next_stage()
+
+        twr = self.ctrl.get_avail_twr()
+        if twr < 1.0:
+            print 'ABORT! TWR TOO LOW! {}'.format(twr)
+
+        low_twr_pitch = 85
+        high_twr_pitch = 72.5
+
+        twr_low_bound = 1.3
+        twr_high_bound = 2.25
+
+        if twr <= twr_low_bound:
+            self.ctrl.pitch_manager.fixed_point_pitch = low_twr_pitch
+        elif twr_low_bound < twr < twr_high_bound:
+            pct = (twr - twr_low_bound) / (twr_low_bound - twr_high_bound)
+            self.ctrl.pitch_manager.fixed_point_pitch = low_twr_pitch + pct * (low_twr_pitch - high_twr_pitch)
+        else:
+            self.ctrl.pitch_manager.fixed_point_pitch = high_twr_pitch
+
+        print 'fixed pitch: {}'.format(self.ctrl.pitch_manager.fixed_point_pitch)
 
         last_second = datetime.now().second
 
@@ -60,10 +86,10 @@ class AscentState(State):
 
                 i = 0
                 last_second = curr_second
-            if self.ctrl.altitude < self.ctrl.ALTITUDE_TURN_START:
+            if self.ctrl.altitude < self.ALTITUDE_TURN_START:
                 self.ctrl.pitch_follow = PitchManager.FIXED_UP
 
-            elif self.ctrl.altitude >= self.ctrl.ALTITUDE_TURN_START:
+            elif self.ctrl.altitude >= self.ALTITUDE_TURN_START:
                 if self.ctrl.altitude < 30000:
                     if self.ctrl.mach < 0.4:
                         self.ctrl.pitch_follow = PitchManager.FIXED_POINT
@@ -102,8 +128,8 @@ class AscentState(State):
                 # if self.ctrl.mach > 1.5:
                 #     out_of_bucket = True
 
-            if self.ctrl.apoapsis_altitude < self.ctrl.ALTITUDE_TARGET:
-                if self.ctrl.apoapsis_altitude >= self.ctrl.ALTITUDE_TARGET * 0.975:
+            if self.ctrl.apoapsis_altitude < self.ALTITUDE_TARGET:
+                if self.ctrl.apoapsis_altitude >= self.ALTITUDE_TARGET * 0.975:
                     self.ctrl.set_throttle(0.25)
             else:
                 self.ctrl.set_throttle(0)
@@ -114,11 +140,12 @@ class AscentState(State):
                     # burn_start_time = self.ctrl.ut + self.ctrl.time_to_apoapsis - (burn_time_for_circle / 2.0)
                     print 'dv needed: {}'.format(dv_circ_burn)
                     self.ctrl.set_burn_dv(dv_circ_burn)
-                    print 'burn point: {}',format(self.ctrl.ut + self.ctrl.time_to_apoapsis)
+                    print 'burn point: {}'.format(self.ctrl.ut + self.ctrl.time_to_apoapsis)
                     self.ctrl.set_burn_point(self.ctrl.ut + self.ctrl.time_to_apoapsis)
                     print 'ut:         {}'.format(self.ctrl.ut)
                     print 'burn start: {}'.format(self.ctrl.get_burn_start())
                     print 'burn time: {}'.format(self.ctrl.get_burn_time())
+                    self.ctrl.vessel.control.rcs = True
                     self.ctrl.space_center.warp_to(self.ctrl.get_burn_start() - 20)
                     self.ctrl.set_NextStateCls(CoastToApoapsis)
                     break
@@ -159,8 +186,6 @@ class CoastToApoapsis(State):
                 i = 0
                 last_second = curr_second
 
-
-
             # if self.ctrl.time_to_apoapsis > (90 + self.burn_time_for_circle / 2.0 - self.burn_time_for_circle * 0.1):
             if self.ctrl.ut < burn_start_time - 15:
                 pass
@@ -175,9 +200,9 @@ class CoastToApoapsis(State):
                 # self.ctrl.set_throttle(1.0)
                 # pass
             else:
+                self.ctrl.vessel.control.rcs = False
                 sleep(self.ctrl.get_burn_time() + 5)
                 # self.ctrl.set_throttle(0.0)
-                # self.ctrl.vessel.control.rcs = False
                 self.ctrl.set_NextStateCls(InOrbit)
                 break
 

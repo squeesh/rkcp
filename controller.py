@@ -1,5 +1,5 @@
 from time import sleep
-from threading import Thread, Lock
+from threading import Thread, Lock, Condition
 import krpc
 from datetime import datetime
 from collections import defaultdict
@@ -12,10 +12,6 @@ from manager import StagingManager, PitchManager, ThrottleManager, BurnManager
 
 
 class Controller(SingletonMixin, object):
-    ALTITUDE_TURN_START = 250
-    ALTITUDE_TARGET = 175000
-    FIXED_POINT_PITCH = 85
-
     pitch_follow = PitchManager.FIXED_UP
 
     current_state = None
@@ -97,56 +93,50 @@ class Controller(SingletonMixin, object):
         # self.current_decouple_stage = get_current_decouple_stage(self.vessel)
 
         self._parts_in_stage = {
-            'all': {},
+            'all': defaultdict(list),
             'engine': defaultdict(list),
             # 'liquidfuel': defaultdict(list),
         }
         self._parts_in_decouple_stage = {
-            'all': {},
+            'all': defaultdict(list),
             'engine': defaultdict(list),
             # 'liquidfuel': defaultdict(list),
         }
         # self._part_streams = defaultdict(dict)
         self._engine_data = defaultdict(dict)
 
-        print 'wut'
-        for i in range(max([part.stage for part in self.vessel.parts.all]), -2, -1):
-            parts_in_stage = self.vessel.parts.in_stage(i)
-            self._parts_in_stage['all'][i] = parts_in_stage
+        # for i in range(max([part.stage for part in self.vessel.parts.all]), -2, -1):
+        #     parts_in_stage = self.vessel.parts.in_stage(i)
+        #     self._parts_in_stage['all'][i] = parts_in_stage
 
-            for part in parts_in_stage:
-                if part.engine:
-                    self._parts_in_stage['engine'][i].append(part)
-                    self._engine_data[part]['has_fuel'] = True
-                    # self._part_streams[part]['available_thrust'] = self.connection.add_stream(getattr, part.engine, 'available_thrust')
-                    # self._part_streams[part]['thrust'] = self.connection.add_stream(getattr, part.engine, 'thrust')
-        print 'wut wut'
+            # for part in parts_in_stage:
+        for part in self.vessel.parts.all:
+            stage = part.stage
+            self._parts_in_stage['all'][stage].append(part)
+            decouple_stage = part.decouple_stage
+            self._parts_in_decouple_stage['all'][decouple_stage].append(part)
+            if part.engine:
+                self._parts_in_stage['engine'][stage].append(part)
+                self._engine_data[part]['has_fuel'] = True
+                self._parts_in_decouple_stage['engine'][decouple_stage].append(part)
+                # self._part_streams[part]['available_thrust'] = self.connection.add_stream(getattr, part.engine, 'available_thrust')
+                # self._part_streams[part]['thrust'] = self.connection.add_stream(getattr, part.engine, 'thrust')
 
-        for i in range(max([part.decouple_stage for part in self.vessel.parts.all]), -2, -1):
-            parts_in_decouple_stage = self.vessel.parts.in_decouple_stage(i)
-            self._parts_in_decouple_stage['all'][i] = parts_in_decouple_stage
-
-            for part in parts_in_decouple_stage:
-                if part.engine:
-                    self._parts_in_decouple_stage['engine'][i].append(part)
-
-        # for key, value in self._parts_in_decouple_stage['all'].items():
-        #     print key, '|', value
+        # for i in range(max([part.decouple_stage for part in self.vessel.parts.all]), -2, -1):
+        #     parts_in_decouple_stage = self.vessel.parts.in_decouple_stage(i)
+        #     self._parts_in_decouple_stage['all'][i] = parts_in_decouple_stage
         #
-        # print '---'
-        #
-        # for key, value in self._parts_in_decouple_stage['engine'].items():
-        #     print key, '|', value
-        #
-        #
-        #
-        # adfasdf
+        #     for part in parts_in_decouple_stage:
+        #         if part.engine:
+        #             self._parts_in_decouple_stage['engine'][i].append(part)
 
     def run(self):
         self.staging_manager = StagingManager()
         self.pitch_manager = PitchManager()
         self.throttle_manager = ThrottleManager()
         self.burn_manager = BurnManager()
+
+        self.state_condition = Condition()
 
         # print 'dcs: {}'.format(self.current_decouple_stage)
         # dv1 = self.burn_manager.get_dv_in_decouple_stage(self.current_decouple_stage)
@@ -171,15 +161,18 @@ class Controller(SingletonMixin, object):
         # self.current_state = TransitionToHover()
 
         while True:
-            if not self.current_state._thread.isAlive():
-                NextStateCls = self.get_NextStateCls()
-                if NextStateCls is None:
-                    break
-                self.set_NextStateCls(None)
-                print 'switch state to: ', NextStateCls
-                self.current_state = NextStateCls()
+            # if not self.current_state._thread.isAlive():
+            self.state_condition.acquire()
+            self.state_condition.wait()
 
-        sleep(0.1)
+            NextStateCls = self.get_NextStateCls()
+            if NextStateCls is None:
+                break
+            self.set_NextStateCls(None)
+            print 'switch state to: ', NextStateCls
+            self.current_state = NextStateCls()
+
+            self.state_condition.release()
 
     @property
     def vessel(self):
@@ -346,18 +339,67 @@ class Controller(SingletonMixin, object):
 
     @property
     def current_stage(self):
-
-        # return max([part.stage for part in self.vessel.parts.all])
-        print self._parts_in_stage
-        return max(chain(*[stages.keys() for part_type, stages in self._parts_in_stage.items()]))
+        print
+        print '&&current_stage'
+        for part_type, stages in self._parts_in_stage.items():
+            print part_type
+            for stage, parts in stages.items():
+                print '\t', stage, '|', parts
+        return self.vessel.control.current_stage
+        # return max(chain(*[stages.keys() for part_type, stages in self._parts_in_stage.items()]))
 
     @property
     def current_decouple_stage(self):
-        # return max([part.decouple_stage for part in self.vessel.parts.all])
+        print
+        print '##current_decouple_stage'
+        for part_type, stages in self._parts_in_decouple_stage.items():
+            print part_type
+            for stage, parts in stages.items():
+                print '\t', stage, '|', parts
         return max(chain(*[stages.keys() for part_type, stages in self._parts_in_decouple_stage.items()]))
 
     def activate_next_stage(self):
-        stage_num = max(self.current_stage, self.current_decouple_stage)
-        [stages.pop(stage_num, None) for part_type, stages in self._parts_in_stage.items()]
-        [stages.pop(stage_num, None) for part_type, stages in self._parts_in_decouple_stage.items()]
+        # stage_num = max(self.current_stage, self.current_decouple_stage)
+        old_stage_num = self.vessel.control.current_stage
+        # [stages.pop(stage_num, None) for part_type, stages in self._parts_in_stage.items()]
+        # [stages.pop(stage_num, None) for part_type, stages in self._parts_in_decouple_stage.items()]
         self.vessel.control.activate_next_stage()
+        # stage_num = self.ctrl.vessel.control.current_stage
+        new_stage_num = old_stage_num-1
+
+        # parts_in_stage = self.vessel.parts.in_stage(stage_num)
+        # print '**PARTS: {}'.format(parts_in_stage)
+        # for part in parts_in_stage:
+        #     if part not in self._parts_in_stage['all'][stage_num]:
+        #         self._parts_in_stage['all'][stage_num].append(part)
+        #     if part.engine and part not in self._parts_in_stage['engine'][stage_num]:
+        #         self._parts_in_stage['engine'][stage_num].append(part)
+
+        # to_print = defaultdict(list)
+
+        for part_type in self._parts_in_stage:
+            for part in self._parts_in_stage[part_type][old_stage_num]:
+                # if part not in to_print[part.stage]:
+                #     to_print[part.stage].append(part)
+                if part not in self._parts_in_stage[part_type][part.stage]:
+                    self._parts_in_stage[part_type][part.stage].append(part)
+
+        [stages.pop(old_stage_num, None) for part_type, stages in self._parts_in_stage.items()]
+        [stages.pop(new_stage_num, None) for part_type, stages in self._parts_in_decouple_stage.items()]
+
+        print '**STAGE {}'.format(old_stage_num)
+        # for key, val in to_print.items():
+        #     print key, '**', val
+
+    def get_local_gravity(self):
+        r = self.equatorial_radius
+        h = self.altitude
+        g = self.surface_gravity
+        return g * (r / (r + h)) ** 2
+
+    def get_avail_twr(self):
+        return self.available_thrust / (self.mass * self.get_local_gravity())
+
+    def get_twr(self):
+        return self.thrust / (self.mass * self.get_local_gravity())
+

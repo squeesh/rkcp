@@ -35,7 +35,9 @@ class PitchManager(object):
     ORBIT_PROGRADE = 3
     CUSTOM_PITCH_HEADING = 4
     curr_follow = FIXED_UP
+
     custom_pitch_heading = (90, 90)
+    fixed_point_pitch = 85
 
     def __init__(self):
         from controller import Controller
@@ -54,7 +56,7 @@ class PitchManager(object):
                 vessel.auto_pilot.target_pitch_and_heading(90, 90)
             elif follow == self.FIXED_POINT:
                 vessel.auto_pilot.reference_frame = vessel.surface_reference_frame
-                vessel.auto_pilot.target_pitch_and_heading(self.ctrl.FIXED_POINT_PITCH, 90)
+                vessel.auto_pilot.target_pitch_and_heading(self.fixed_point_pitch, 90)
             elif follow == self.SURFACE_PROGRADE:
                 if vessel.flight().pitch > 30:
                     vessel.auto_pilot.reference_frame = vessel.surface_velocity_reference_frame
@@ -207,10 +209,14 @@ class BurnManager(object):
         g = 9.8
 
         engines_in_decouple_stage = self.ctrl.get_parts_in_decouple_stage(decouple_stage, 'engine')
+        print '== engs dcs: {}'.format(engines_in_decouple_stage)
         engine_stages = [part.stage for part in engines_in_decouple_stage]
+        print '== engs stg: {}'.format(engine_stages)
         engines = []
         for stage in engine_stages:
             engines.extend(self.ctrl.get_parts_in_stage(stage, 'engine'))
+
+        print '== engs: {}'.format(engines)
 
         # total_thrust = sum([part.engine.max_thrust for part in engines])
         # isp = 0
@@ -219,6 +225,7 @@ class BurnManager(object):
         #     isp += part.engine.vacuum_specific_impulse * engine_contrib
 
         isp = self.ctrl.get_isp_for_engines(engines)
+        print '== isp: {}'.format(isp)
 
         # resources_in_decouple_stage = self.ctrl.vessel \
         #     .resources_in_decouple_stage(decouple_stage, cumulative=False)
@@ -228,6 +235,7 @@ class BurnManager(object):
         # fuel_mass_in_stage = liquid_fuel_in_stage + oxidizer_in_stage
 
         fuel_mass_in_stage = self.ctrl.get_resource_mass_for_decouple_stage(decouple_stage)
+        print '== fuel in stg: {}'.format(fuel_mass_in_stage)
 
         # all_stage_parts = self.ctrl.all_parts_after_stage(decouple_stage)
         # for sub_decouple_stage in range(decouple_stage, -2, -1):
@@ -237,7 +245,9 @@ class BurnManager(object):
 
         # m_i = self.ctrl.mass
         m_i = sum([part.mass for part in self.ctrl.all_parts_after_decouple_stage(decouple_stage)])
+        print '== m_i: {}'.format(m_i)
         m_f = m_i - fuel_mass_in_stage
+        print '== m_f: {}'.format(m_f)
 
         # # print 'thrust: ', total_thrust
         # print 'dcp: ', decouple_stage
@@ -253,21 +263,29 @@ class BurnManager(object):
             decouple_stage = self.ctrl.current_decouple_stage
 
         def get_burn_time_for_decouple_stage(current_dv, current_decouple_stage):
+            print '--cds: {}'.format(current_decouple_stage)
+            print '--curr stg: {}'.format(self.ctrl.current_stage)
+            print '--curr dsg: {}'.format(self.ctrl.current_decouple_stage)
             # print 'cdv: ', current_dv, '|', current_decouple_stage
             engines_in_decouple_stage = self.ctrl.get_parts_in_decouple_stage(current_decouple_stage, 'engine')
+            print '--decoup eng: {}'.format(engines_in_decouple_stage)
 
             engine_stages = [part.stage for part in engines_in_decouple_stage]
+            print '--eng stage: {}'.format(engine_stages)
 
             engines = []
             for stage in engine_stages:
                 engines.extend(self.ctrl.get_parts_in_stage(stage, 'engine'))
+            print '--engs: {}'.format(engines)
 
             isp = self.ctrl.get_isp_for_engines(engines)
+            print '--isp: {}'.format(isp)
             m_i = sum([part.mass for part in self.ctrl.all_parts_after_decouple_stage(current_decouple_stage)])
             print '--mass: {} | {}'.format(self.ctrl.mass, m_i)
             # isp = self.ctrl.specific_impulse
             # f = self.ctrl.available_thrust
             f = self.ctrl.get_thrust_for_engines(engines)
+            print '--f: {}'.format(f)
             g = 9.8  # This is a constant, not -> self.ctrl.surface_gravity
 
             if isp > 0.0:
@@ -291,6 +309,7 @@ class BurnManager(object):
                 break
 
         # hack ... bug is putting Nones into the array... remove them
+        print 'burn_times: {}'.format(burn_times)
         burn_times = [time for time in burn_times if time is not None]
         print 'burn_times: {}'.format(burn_times)
         return burn_times
