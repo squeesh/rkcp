@@ -1,6 +1,6 @@
 from threading import Thread
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 import math
 from time import sleep
 
@@ -32,7 +32,9 @@ class PitchManager(object):
     FIXED_POINT = 1
     SURFACE_PROGRADE = 2
     ORBIT_PROGRADE = 3
+    CUSTOM_PITCH_HEADING = 4
     curr_follow = FIXED_UP
+    custom_pitch_heading = (90, 90)
 
     def __init__(self):
         from controller import Controller
@@ -51,10 +53,14 @@ class PitchManager(object):
                 vessel.auto_pilot.target_pitch_and_heading(90, 90)
             elif follow == self.FIXED_POINT:
                 vessel.auto_pilot.reference_frame = vessel.surface_reference_frame
-                vessel.auto_pilot.target_pitch_and_heading(80, 90)
+                vessel.auto_pilot.target_pitch_and_heading(self.ctrl.FIXED_POINT_PITCH, 90)
             elif follow == self.SURFACE_PROGRADE:
-                vessel.auto_pilot.reference_frame = vessel.surface_velocity_reference_frame
-                vessel.auto_pilot.target_direction = (0, 1, 0)
+                if vessel.flight().pitch > 30:
+                    vessel.auto_pilot.reference_frame = vessel.surface_velocity_reference_frame
+                    vessel.auto_pilot.target_direction = (0, 1, 0)
+                else:
+                    vessel.auto_pilot.reference_frame = vessel.surface_reference_frame
+                    vessel.auto_pilot.target_pitch_and_heading(30, 90)
                 # if vessel.auto_pilot.target_roll == 180:
                 #     vessel.auto_pilot.target_pitch_and_heading(flight.pitch + flight.angle_of_attack, 90)
                 # else:
@@ -62,16 +68,25 @@ class PitchManager(object):
             elif follow == self.ORBIT_PROGRADE:
                 # orb_prograde, _ = get_pitch_heading(flight.prograde)
                 # vessel.auto_pilot.target_pitch_and_heading(orb_prograde, 90)
-                flight = self.ctrl.vessel.flight()
+                flight = vessel.flight()
                 vessel.auto_pilot.reference_frame = vessel.surface_reference_frame
                 vessel.auto_pilot.target_direction = flight.prograde
+            elif follow == self.CUSTOM_PITCH_HEADING:
+                vessel.auto_pilot.reference_frame = vessel.surface_reference_frame
+                vessel.auto_pilot.target_pitch_and_heading(*self.custom_pitch_heading)
 
 
 class ThrottleManager(object):
     _old_throttle = 0
     _throttle = 0
+    _throttle_queue = None
+
+    set_calls = 0
+    avg_input = False
 
     def __init__(self):
+        self._throttle_queue = []
+
         from controller import Controller
         self.ctrl = Controller.get()
         self._thread = Thread(target=self.run)
@@ -79,16 +94,41 @@ class ThrottleManager(object):
         self._thread.start()
 
     def run(self):
+        # throttle_update_interval = timedelta(milliseconds=10)
+        # last_throttle_update = datetime.now()
+        last_second = datetime.now().second
+        i = 0
         while True:
-            if math.fabs(self._throttle - self._old_throttle) > 0.001:
-                self.ctrl.vessel.control.throttle = self._throttle
-                self._old_throttle = self._throttle
+            # i += 1
+            # curr_second = datetime.now().second
+            # if curr_second != last_second:
+            #     print
+            #     # print 'tps:', i
+            #     print 'que: {}'.format(len(self._throttle_queue))
+            #     print self._throttle_queue[:20]
+            #     print
+            #     # print 'set:', self.set_calls
+            #
+            #     i = 0
+            #     last_second = curr_second
+
+            if not self.avg_input:
+                if math.fabs(self._throttle - self._old_throttle) > 0.001:
+                    self.ctrl.vessel.control.throttle = self._throttle
+                    self._old_throttle = self._throttle
+            elif self._throttle_queue:
+                avg = sum(self._throttle_queue) / float(len(self._throttle_queue))
+                self.ctrl.vessel.control.throttle = avg
+                self._throttle_queue = []
+                sleep(0.1)
+
 
     def get_throttle(self):
         return self._throttle
 
     def set_throttle(self, val):
         self._throttle = val
+        self._throttle_queue.append(val)
 
 
 class BurnManager(object):

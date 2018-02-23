@@ -5,14 +5,15 @@ from datetime import datetime
 from collections import defaultdict
 from functools import partial
 
-from util import SingletonMixin, get_current_stage, get_current_decouple_stage
-from state import AscentState, CoastToApoapsis, InOrbit
+from util import SingletonMixin, get_current_stage, get_current_decouple_stage, get_vessel_pitch_heading
+from state import AscentState, CoastToApoapsis, InOrbit, SurfaceHover, TransitionToHover
 from manager import CallbackManager, PitchManager, ThrottleManager, BurnManager
 
 
 class Controller(SingletonMixin, object):
     ALTITUDE_TURN_START = 250
     ALTITUDE_TARGET = 175000
+    FIXED_POINT_PITCH = 85
 
     pitch_follow = PitchManager.FIXED_UP
 
@@ -39,6 +40,9 @@ class Controller(SingletonMixin, object):
         self._streams_open = 0
 
         stream_funcs = (
+            ('surface_altitude', (getattr, self.vessel.flight(), 'surface_altitude')),
+            ('vertical_speed', (getattr, self.vessel.flight(self.body.reference_frame), 'vertical_speed')),
+
             ('mach', (getattr, self.vessel.flight(), 'mach')),
             ('angle_of_attack', (getattr, self.vessel.flight(), 'angle_of_attack')),
             ('mass', (getattr, self.vessel, 'mass')),
@@ -142,9 +146,57 @@ class Controller(SingletonMixin, object):
         # sleep(1)
         # asdfasdf
 
-        self.current_state = AscentState()
+        # conn = krpc.connect(name='User Interface Example')
+        canvas = self.connection.ui.stock_canvas
+
+        # Get the size of the game window in pixels
+        screen_size = canvas.rect_transform.size
+
+        # Add a panel to contain the UI elements
+        panel = canvas.add_panel()
+
+        # Position the panel on the left of the screen
+        rect = panel.rect_transform
+        rect.size = (200, 100)
+        rect.position = (110 - (screen_size[0] / 2), 0)
+
+        # Add a button to set the throttle to maximum
+        fwd_btn = panel.add_button("Forward")
+        fwd_btn.rect_transform.position = (0, 30)
+        hvr_btn = panel.add_button("Hover")
+        hvr_btn.rect_transform.position = (0, 0)
+        rvs_btn = panel.add_button("Reverse")
+        rvs_btn.rect_transform.position = (0, -30)
+
+        # Set up a stream to monitor the throttle button
+        fwd_btn_clicked = self.connection.add_stream(getattr, fwd_btn, 'clicked')
+        hvr_btn_clicked = self.connection.add_stream(getattr, hvr_btn, 'clicked')
+        rvs_btn_clicked = self.connection.add_stream(getattr, rvs_btn, 'clicked')
+
+        # self.current_state = AscentState()
         # self.current_state = CoastToApoapsis()
+        self.current_state = TransitionToHover()
+
         while True:
+            # Handle the throttle button being clicked
+            # print fwd_btn_clicked(), '|', hvr_btn_clicked(), '|', rvs_btn_clicked()
+            if fwd_btn_clicked():
+                self.pitch_follow = PitchManager.CUSTOM_PITCH_HEADING
+                # flight = self.vessel.flight(self.vessel.surface_velocity_reference_frame)
+                pitch, heading = get_vessel_pitch_heading(self.vessel)
+                self.pitch_manager.custom_pitch_heading = (-60, heading)
+                fwd_btn.clicked = False
+            elif hvr_btn_clicked():
+                self.pitch_follow = PitchManager.CUSTOM_PITCH_HEADING
+                pitch, heading = get_vessel_pitch_heading(self.vessel)
+                self.pitch_manager.custom_pitch_heading = (0, heading)
+                hvr_btn.clicked = False
+            elif rvs_btn_clicked():
+                self.pitch_follow = PitchManager.CUSTOM_PITCH_HEADING
+                pitch, heading = get_vessel_pitch_heading(self.vessel)
+                self.pitch_manager.custom_pitch_heading = (60, heading)
+                rvs_btn.clicked = False
+
             if not self.current_state._thread.isAlive():
                 NextStateCls = self.get_NextStateCls()
                 if NextStateCls is None:
@@ -153,7 +205,7 @@ class Controller(SingletonMixin, object):
                 print 'switch state to: ', NextStateCls
                 self.current_state = NextStateCls()
 
-        sleep(5)
+        sleep(0.1)
 
     @property
     def vessel(self):

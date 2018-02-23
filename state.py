@@ -3,7 +3,7 @@ from threading import Thread
 import math
 from datetime import datetime
 
-from util import get_avail_twr, get_dv_needed_for_circularization, get_burn_time_for_dv
+from util import get_avail_twr, get_dv_needed_for_circularization, get_burn_time_for_dv, get_vessel_pitch_heading
 from manager import PitchManager
 
 
@@ -197,3 +197,144 @@ class InOrbit(State):
         #         self.ctrl.set_NextStateCls(Circularize)
         #         break
 
+
+class TransitionToHover(State):
+    def run(self):
+        # self.ctrl.pitch_follow = PitchManager.FIXED_UP
+        self.ctrl.pitch_follow = PitchManager.CUSTOM_PITCH_HEADING
+        pitch, heading = get_vessel_pitch_heading(self.ctrl.vessel)
+        self.ctrl.pitch_manager.custom_pitch_heading = (0, heading)
+
+        vessel = self.ctrl.vessel
+
+        vessel.auto_pilot.engage()
+        vessel.auto_pilot.target_roll = 0
+
+        last_second = datetime.now().second
+
+        i = 0
+        while True:
+            i += 1
+            curr_second = datetime.now().second
+            if curr_second != last_second:
+                print
+                print 'tks:', i
+                print 'stms:', self.ctrl._streams_open
+                print 'alt:', self.ctrl.altitude
+                print 'speed:', self.ctrl.vertical_speed
+                print 'follow:', self.ctrl.pitch_follow
+                print 'apoapsis:', self.ctrl.apoapsis_altitude
+                print 'periapsis:', self.ctrl.periapsis_altitude
+
+                i = 0
+                last_second = curr_second
+
+            if self.ctrl.apoapsis_altitude <= SurfaceHover.MIN_HEIGHT:
+                # target_twr = 1.1
+                # avail_twr = get_avail_twr(self.ctrl)
+                # throttle_pct = target_twr / avail_twr
+                self.ctrl.set_throttle(1.0)
+            else:
+                self.ctrl.set_throttle(0.0)
+
+            if self.ctrl.surface_altitude > SurfaceHover.MIN_HEIGHT:
+                self.ctrl.set_NextStateCls(SurfaceHover)
+                break
+
+
+class SurfaceHover(State):
+    MIN_HEIGHT = 15.0
+    MAX_HEIGHT = 20.0
+    SPEED = 0.15
+
+    def run(self):
+        self.ctrl.pitch_follow = PitchManager.FIXED_UP
+        self.ctrl.throttle_manager.avg_input = True
+
+        vessel = self.ctrl.vessel
+
+        vessel.auto_pilot.engage()
+        # vessel.auto_pilot.target_roll = 0
+
+        last_second = datetime.now().second
+
+        i = 0
+        while True:
+            i += 1
+            curr_second = datetime.now().second
+
+            pitch, heading = get_vessel_pitch_heading(self.ctrl.vessel)
+
+            if curr_second != last_second:
+                print
+                print 'tks:', i
+                print 'stms:', self.ctrl._streams_open
+                print 'alt:', self.ctrl.altitude
+                print 'speed:', self.ctrl.vertical_speed
+                print 'follow:', self.ctrl.pitch_follow
+                print 'ptch_head:', self.ctrl.pitch_manager.custom_pitch_heading
+                print 'pitch:', pitch
+                print 'heading:', heading
+                print 'apoapsis:', self.ctrl.apoapsis_altitude
+                print 'periapsis:', self.ctrl.periapsis_altitude
+                print
+
+                i = 0
+                last_second = curr_second
+
+            # if self.ctrl.surface_altitude <= 15:
+            #     target_twr = 1.1
+            # elif 15 < self.ctrl.surface_altitude < 25:
+            #     target_twr = 1.0
+            # else:
+            #     target_twr = 0.9
+
+            avail_twr = get_avail_twr(self.ctrl)
+
+            # min_height = 7.5
+            # max_height = 12.5
+            # speed = 0.15
+
+            # if self.ctrl.vertical_speed <= -speed:
+            #     if self.ctrl.surface_altitude <= min_height:
+            #         target_twr = avail_twr
+            #     else:
+            #         target_twr = 1.0
+            # elif -speed < self.ctrl.vertical_speed < speed:
+            #     if self.ctrl.surface_altitude <= min_height:
+            #         target_twr = 1.1
+            #     elif min_height < self.ctrl.surface_altitude < max_height:
+            #         target_twr = 1.0
+            #     else:
+            #         target_twr = 0.9
+            # else:
+            #     if self.ctrl.surface_altitude >= max_height:
+            #         target_twr = 0.0
+            #     else:
+            #         target_twr = 1.0
+
+            if self.ctrl.apoapsis_altitude <= self.MIN_HEIGHT:
+                if self.ctrl.vertical_speed < 0:
+                    target_twr = avail_twr
+                else:
+                    target_twr = 1.25
+            elif self.MIN_HEIGHT < self.ctrl.apoapsis_altitude < self.MAX_HEIGHT:
+                if self.ctrl.vertical_speed <= -self.SPEED:
+                    target_twr = 1.75
+                elif -self.SPEED < self.ctrl.vertical_speed < self.SPEED:
+                    spread = (self.MAX_HEIGHT - self.MIN_HEIGHT) / 2.0
+                    mid_alt = self.MIN_HEIGHT + spread
+                    alt_diff = mid_alt - self.ctrl.apoapsis_altitude
+
+                    target_twr = 1.0 + (alt_diff / spread) * 0.5
+                else:
+                    target_twr = 0.25
+
+            else:
+                # if self.ctrl.vertical_speed < 0:
+                #     target_twr = 1.25
+                # else:
+                target_twr = 0.5
+
+            throttle_pct = target_twr / avail_twr
+            self.ctrl.set_throttle(throttle_pct)
