@@ -1,30 +1,31 @@
-from threading import Thread
+from threading import Thread, Lock
 from collections import defaultdict
 from datetime import datetime, timedelta
 import math
 from time import sleep
+from functools import partial
 
 
-class CallbackManager(object):
-    _callbacks = defaultdict(list)
-
-    def __init__(self):
-        from controller import Controller
-        from callback import has_fuel_callback
-
-        ctrl = Controller.get()
-
-        for part in ctrl.vessel.parts.all:
-            if part.engine:
-                self.register_callback('fuel', ctrl.connection.add_stream(getattr, part.engine, 'has_fuel'), has_fuel_callback)
-                # e_stream = self.connection.add_stream(getattr, part.engine, 'has_fuel')
-                # e_stream.add_callback(has_fuel_callback)
-                # e_stream.start()
-
-    def register_callback(self, name, stream, callback):
-        stream.add_callback(callback)
-        stream.start()
-        self._callbacks[name].append(stream)
+# class CallbackManager(object):
+#     _callbacks = defaultdict(list)
+#
+#     def __init__(self):
+#         from controller import Controller
+#         from callback import has_fuel_callback
+#
+#         ctrl = Controller.get()
+#
+#         for part in ctrl.vessel.parts.all:
+#             if part.engine:
+#                 self.register_callback('fuel', ctrl.connection.add_stream(getattr, part.engine, 'has_fuel'), has_fuel_callback)
+#                 # e_stream = self.connection.add_stream(getattr, part.engine, 'has_fuel')
+#                 # e_stream.add_callback(has_fuel_callback)
+#                 # e_stream.start()
+#
+#     def register_callback(self, name, stream, callback):
+#         stream.add_callback(callback)
+#         stream.start()
+#         self._callbacks[name].append(stream)
 
 
 class PitchManager(object):
@@ -303,3 +304,31 @@ class BurnManager(object):
     def get_burn_time(self):
         print 'bt= {}'.format(self._burn_times)
         return sum(self._burn_times) + ((len(self._burn_times) - 1) * 0.5)
+
+
+class StagingManager(object):
+    def __init__(self):
+        from controller import Controller
+        self.ctrl = Controller.get()
+        self.fuel_lock = Lock()
+        self.decouple_stage_activate_next = {}
+
+        for part in self.ctrl.engine_data:
+            stream = self.ctrl.connection.add_stream(getattr, part.engine, 'has_fuel')
+            stream.add_callback(partial(self.has_fuel_callback, part=part))
+            stream.start()
+
+    def has_fuel_callback(self, has_fuel, part):
+        self.ctrl.engine_data[part]['has_fuel'] = has_fuel
+
+        if not has_fuel and not self.ctrl.burn_manager.burning:
+            with self.fuel_lock:
+                engines_to_decouple = self.ctrl.get_parts_in_decouple_stage(self.ctrl.current_decouple_stage, 'engine')
+                if engines_to_decouple:
+                    all_engines_flameout = not any([self.ctrl.engine_data[part]['has_fuel'] for part in engines_to_decouple])
+
+                    if all_engines_flameout:
+                        already_activated = self.decouple_stage_activate_next.get(self.ctrl.current_decouple_stage, False)
+                        if not already_activated:
+                            self.decouple_stage_activate_next[self.ctrl.current_decouple_stage] = True
+                            self.ctrl.activate_next_stage()

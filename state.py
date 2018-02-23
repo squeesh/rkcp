@@ -39,7 +39,8 @@ class AscentState(State):
         vessel.auto_pilot.engage()
         vessel.auto_pilot.target_pitch_and_heading(90, 90)
         vessel.auto_pilot.target_roll = 0
-        vessel.control.activate_next_stage()
+
+        self.ctrl.activate_next_stage()
 
         last_second = datetime.now().second
 
@@ -256,8 +257,34 @@ class SurfaceHover(State):
         vessel.auto_pilot.engage()
         # vessel.auto_pilot.target_roll = 0
 
-        last_second = datetime.now().second
+        # conn = krpc.connect(name='User Interface Example')
+        canvas = self.ctrl.connection.ui.stock_canvas
 
+        # Get the size of the game window in pixels
+        screen_size = canvas.rect_transform.size
+
+        # Add a panel to contain the UI elements
+        panel = canvas.add_panel()
+
+        # Position the panel on the left of the screen
+        rect = panel.rect_transform
+        rect.size = (200, 100)
+        rect.position = (110 - (screen_size[0] / 2), 0)
+
+        # Add a button to set the throttle to maximum
+        fwd_btn = panel.add_button("Forward")
+        fwd_btn.rect_transform.position = (0, 30)
+        hvr_btn = panel.add_button("Hover")
+        hvr_btn.rect_transform.position = (0, 0)
+        rvs_btn = panel.add_button("Reverse")
+        rvs_btn.rect_transform.position = (0, -30)
+
+        # Set up a stream to monitor the throttle button
+        fwd_btn_clicked = self.ctrl.connection.add_stream(getattr, fwd_btn, 'clicked')
+        hvr_btn_clicked = self.ctrl.connection.add_stream(getattr, hvr_btn, 'clicked')
+        rvs_btn_clicked = self.ctrl.connection.add_stream(getattr, rvs_btn, 'clicked')
+
+        last_second = datetime.now().second
         i = 0
         while True:
             i += 1
@@ -282,49 +309,39 @@ class SurfaceHover(State):
                 i = 0
                 last_second = curr_second
 
-            # if self.ctrl.surface_altitude <= 15:
-            #     target_twr = 1.1
-            # elif 15 < self.ctrl.surface_altitude < 25:
-            #     target_twr = 1.0
-            # else:
-            #     target_twr = 0.9
+            # Handle the throttle button being clicked
+            # print fwd_btn_clicked(), '|', hvr_btn_clicked(), '|', rvs_btn_clicked()
+            if fwd_btn_clicked():
+                self.pitch_follow = PitchManager.CUSTOM_PITCH_HEADING
+                # flight = self.vessel.flight(self.vessel.surface_velocity_reference_frame)
+                pitch, heading = get_vessel_pitch_heading(self.ctrl.vessel)
+                self.ctrl.pitch_manager.custom_pitch_heading = (-60, heading)
+                fwd_btn.clicked = False
+            elif hvr_btn_clicked():
+                self.pitch_follow = PitchManager.CUSTOM_PITCH_HEADING
+                pitch, heading = get_vessel_pitch_heading(self.ctrl.vessel)
+                self.ctrl.pitch_manager.custom_pitch_heading = (0, heading)
+                hvr_btn.clicked = False
+            elif rvs_btn_clicked():
+                self.pitch_follow = PitchManager.CUSTOM_PITCH_HEADING
+                pitch, heading = get_vessel_pitch_heading(self.ctrl.vessel)
+                self.ctrl.pitch_manager.custom_pitch_heading = (60, heading)
+                rvs_btn.clicked = False
 
             avail_twr = get_avail_twr(self.ctrl)
-
-            # min_height = 7.5
-            # max_height = 12.5
-            # speed = 0.15
-
-            # if self.ctrl.vertical_speed <= -speed:
-            #     if self.ctrl.surface_altitude <= min_height:
-            #         target_twr = avail_twr
-            #     else:
-            #         target_twr = 1.0
-            # elif -speed < self.ctrl.vertical_speed < speed:
-            #     if self.ctrl.surface_altitude <= min_height:
-            #         target_twr = 1.1
-            #     elif min_height < self.ctrl.surface_altitude < max_height:
-            #         target_twr = 1.0
-            #     else:
-            #         target_twr = 0.9
-            # else:
-            #     if self.ctrl.surface_altitude >= max_height:
-            #         target_twr = 0.0
-            #     else:
-            #         target_twr = 1.0
-
-            if self.ctrl.apoapsis_altitude <= self.MIN_HEIGHT:
+            surf_apoapsis_alt = self.ctrl.surface_altitude + self.ctrl.apoapsis_altitude
+            if surf_apoapsis_alt <= self.MIN_HEIGHT:
                 if self.ctrl.vertical_speed < 0:
                     target_twr = avail_twr
                 else:
                     target_twr = 1.25
-            elif self.MIN_HEIGHT < self.ctrl.apoapsis_altitude < self.MAX_HEIGHT:
+            elif self.MIN_HEIGHT < surf_apoapsis_alt < self.MAX_HEIGHT:
                 if self.ctrl.vertical_speed <= -self.SPEED:
                     target_twr = 1.75
                 elif -self.SPEED < self.ctrl.vertical_speed < self.SPEED:
                     spread = (self.MAX_HEIGHT - self.MIN_HEIGHT) / 2.0
                     mid_alt = self.MIN_HEIGHT + spread
-                    alt_diff = mid_alt - self.ctrl.apoapsis_altitude
+                    alt_diff = mid_alt - surf_apoapsis_alt
 
                     target_twr = 1.0 + (alt_diff / spread) * 0.5
                 else:

@@ -4,10 +4,11 @@ import krpc
 from datetime import datetime
 from collections import defaultdict
 from functools import partial
+from itertools import chain
 
 from util import SingletonMixin, get_current_stage, get_current_decouple_stage, get_vessel_pitch_heading
 from state import AscentState, CoastToApoapsis, InOrbit, SurfaceHover, TransitionToHover
-from manager import CallbackManager, PitchManager, ThrottleManager, BurnManager
+from manager import StagingManager, PitchManager, ThrottleManager, BurnManager
 
 
 class Controller(SingletonMixin, object):
@@ -92,8 +93,8 @@ class Controller(SingletonMixin, object):
         # self._surface_gravity = self.connection.add_stream(getattr, self.body, 'surface_gravity')
         # self._equatorial_radius = self.connection.add_stream(getattr, self.body, 'equatorial_radius')
 
-        self.current_stage = get_current_stage(self.vessel)
-        self.current_decouple_stage = get_current_decouple_stage(self.vessel)
+        # self.current_stage = get_current_stage(self.vessel)
+        # self.current_decouple_stage = get_current_decouple_stage(self.vessel)
 
         self._parts_in_stage = {
             'all': {},
@@ -105,19 +106,23 @@ class Controller(SingletonMixin, object):
             'engine': defaultdict(list),
             # 'liquidfuel': defaultdict(list),
         }
-        self._part_streams = defaultdict(dict)
+        # self._part_streams = defaultdict(dict)
+        self._engine_data = defaultdict(dict)
 
-        for i in range(self.current_stage, -2, -1):
+        print 'wut'
+        for i in range(max([part.stage for part in self.vessel.parts.all]), -2, -1):
             parts_in_stage = self.vessel.parts.in_stage(i)
             self._parts_in_stage['all'][i] = parts_in_stage
 
             for part in parts_in_stage:
                 if part.engine:
                     self._parts_in_stage['engine'][i].append(part)
+                    self._engine_data[part]['has_fuel'] = True
                     # self._part_streams[part]['available_thrust'] = self.connection.add_stream(getattr, part.engine, 'available_thrust')
                     # self._part_streams[part]['thrust'] = self.connection.add_stream(getattr, part.engine, 'thrust')
+        print 'wut wut'
 
-        for i in range(self.current_decouple_stage, -2, -1):
+        for i in range(max([part.decouple_stage for part in self.vessel.parts.all]), -2, -1):
             parts_in_decouple_stage = self.vessel.parts.in_decouple_stage(i)
             self._parts_in_decouple_stage['all'][i] = parts_in_decouple_stage
 
@@ -125,8 +130,20 @@ class Controller(SingletonMixin, object):
                 if part.engine:
                     self._parts_in_decouple_stage['engine'][i].append(part)
 
+        # for key, value in self._parts_in_decouple_stage['all'].items():
+        #     print key, '|', value
+        #
+        # print '---'
+        #
+        # for key, value in self._parts_in_decouple_stage['engine'].items():
+        #     print key, '|', value
+        #
+        #
+        #
+        # adfasdf
+
     def run(self):
-        self.callback_manager = CallbackManager()
+        self.staging_manager = StagingManager()
         self.pitch_manager = PitchManager()
         self.throttle_manager = ThrottleManager()
         self.burn_manager = BurnManager()
@@ -146,57 +163,14 @@ class Controller(SingletonMixin, object):
         # sleep(1)
         # asdfasdf
 
-        # conn = krpc.connect(name='User Interface Example')
-        canvas = self.connection.ui.stock_canvas
+        # print self.connection.krpc.paused
+        # self.connection.krpc.paused = True
 
-        # Get the size of the game window in pixels
-        screen_size = canvas.rect_transform.size
-
-        # Add a panel to contain the UI elements
-        panel = canvas.add_panel()
-
-        # Position the panel on the left of the screen
-        rect = panel.rect_transform
-        rect.size = (200, 100)
-        rect.position = (110 - (screen_size[0] / 2), 0)
-
-        # Add a button to set the throttle to maximum
-        fwd_btn = panel.add_button("Forward")
-        fwd_btn.rect_transform.position = (0, 30)
-        hvr_btn = panel.add_button("Hover")
-        hvr_btn.rect_transform.position = (0, 0)
-        rvs_btn = panel.add_button("Reverse")
-        rvs_btn.rect_transform.position = (0, -30)
-
-        # Set up a stream to monitor the throttle button
-        fwd_btn_clicked = self.connection.add_stream(getattr, fwd_btn, 'clicked')
-        hvr_btn_clicked = self.connection.add_stream(getattr, hvr_btn, 'clicked')
-        rvs_btn_clicked = self.connection.add_stream(getattr, rvs_btn, 'clicked')
-
-        # self.current_state = AscentState()
+        self.current_state = AscentState()
         # self.current_state = CoastToApoapsis()
-        self.current_state = TransitionToHover()
+        # self.current_state = TransitionToHover()
 
         while True:
-            # Handle the throttle button being clicked
-            # print fwd_btn_clicked(), '|', hvr_btn_clicked(), '|', rvs_btn_clicked()
-            if fwd_btn_clicked():
-                self.pitch_follow = PitchManager.CUSTOM_PITCH_HEADING
-                # flight = self.vessel.flight(self.vessel.surface_velocity_reference_frame)
-                pitch, heading = get_vessel_pitch_heading(self.vessel)
-                self.pitch_manager.custom_pitch_heading = (-60, heading)
-                fwd_btn.clicked = False
-            elif hvr_btn_clicked():
-                self.pitch_follow = PitchManager.CUSTOM_PITCH_HEADING
-                pitch, heading = get_vessel_pitch_heading(self.vessel)
-                self.pitch_manager.custom_pitch_heading = (0, heading)
-                hvr_btn.clicked = False
-            elif rvs_btn_clicked():
-                self.pitch_follow = PitchManager.CUSTOM_PITCH_HEADING
-                pitch, heading = get_vessel_pitch_heading(self.vessel)
-                self.pitch_manager.custom_pitch_heading = (60, heading)
-                rvs_btn.clicked = False
-
             if not self.current_state._thread.isAlive():
                 NextStateCls = self.get_NextStateCls()
                 if NextStateCls is None:
@@ -366,3 +340,24 @@ class Controller(SingletonMixin, object):
     def set_throttle(self, val):
         self.throttle_manager.set_throttle(val)
 
+    @property
+    def engine_data(self):
+        return self._engine_data
+
+    @property
+    def current_stage(self):
+
+        # return max([part.stage for part in self.vessel.parts.all])
+        print self._parts_in_stage
+        return max(chain(*[stages.keys() for part_type, stages in self._parts_in_stage.items()]))
+
+    @property
+    def current_decouple_stage(self):
+        # return max([part.decouple_stage for part in self.vessel.parts.all])
+        return max(chain(*[stages.keys() for part_type, stages in self._parts_in_decouple_stage.items()]))
+
+    def activate_next_stage(self):
+        stage_num = max(self.current_stage, self.current_decouple_stage)
+        [stages.pop(stage_num, None) for part_type, stages in self._parts_in_stage.items()]
+        [stages.pop(stage_num, None) for part_type, stages in self._parts_in_decouple_stage.items()]
+        self.vessel.control.activate_next_stage()
