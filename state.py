@@ -35,6 +35,8 @@ class State(object):
 
 
 class PreLaunch(State):
+    TARGET_ROLL = 0
+
     def run(self):
         self.ctrl.vessel.control.input_mode = self.ctrl.space_center.ControlInputMode.override
 
@@ -48,22 +50,27 @@ class PreLaunch(State):
         #
         # print 'Lift off!'
         # print 'setting: {}'.format(AscentState)
+
+        self.ctrl.vessel.control.throttle = 1.0
+        self.ctrl.vessel.auto_pilot.engage()
+        self.ctrl.vessel.auto_pilot.target_pitch_and_heading(90, 90)
+        self.ctrl.vessel.auto_pilot.target_roll = self.TARGET_ROLL
+
+        self.ctrl.activate_next_stage()
+
+
+
         self.ctrl.set_NextStateCls(AscentState)
 
 
 class AscentState(State):
     ALTITUDE_TURN_START = 250
     ALTITUDE_TARGET = 175000
+    TARGET_ROLL = PreLaunch.TARGET_ROLL
 
     def run(self):
-        vessel = self.ctrl.vessel
-
-        vessel.control.throttle = 1.0
-        vessel.auto_pilot.engage()
-        vessel.auto_pilot.target_pitch_and_heading(90, 90)
-        vessel.auto_pilot.target_roll = 0
-
-        self.ctrl.activate_next_stage()
+        self.ctrl.vessel.auto_pilot.engage()
+        self.ctrl.vessel.auto_pilot.target_roll = self.TARGET_ROLL
 
         twr = self.ctrl.get_avail_twr()
         if twr < 1.0:

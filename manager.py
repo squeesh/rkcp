@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 import math
 from time import sleep
 from functools import partial
-from util import get_pitch_heading, unit_vector
+from util import get_pitch_heading, unit_vector, engine_is_active
 
 
 # class CallbackManager(object):
@@ -206,13 +206,13 @@ class BurnManager(object):
     def set_burn_dv(self, val):
         self._burn_dv = val
         self._burn_times = self.get_burn_times(val)
-        if self._burn_times and self._burn_point is not None:
+        if not self._burn_start and self._burn_times and self._burn_point is not None:
             self._burn_start = self._burn_point - self.get_burn_time() / 2.0 + 2.5
 
     def set_burn_point(self, val):
         self._burn_point = val
-        if self._burn_times and self._burn_point is not None:
-            print 'ut= {} | bp= {}'.format(self.ctrl.ut, self._burn_point)
+        if not self._burn_start and self._burn_times and self._burn_point is not None:
+            # print 'ut= {} | bp= {}'.format(self.ctrl.ut, self._burn_point)
             self._burn_start = self._burn_point - self.get_burn_time() / 2.0 + 2.5
 
     def get_dv_in_decouple_stage(self, decouple_stage):
@@ -266,7 +266,9 @@ class BurnManager(object):
         # print 'ship mass: ', m_i
         # print 'final mass: ', m_f
 
-        return math.log(m_i / m_f) * isp * g
+        output = math.log(m_i / m_f) * isp * g
+        print '== out: {} | {}'.format(decouple_stage, output)
+        return output
 
     def get_burn_times(self, dv, decouple_stage=None):
         if decouple_stage is None:
@@ -331,7 +333,7 @@ class BurnManager(object):
         return self._burn_start
 
     def get_burn_time(self):
-        print 'bt= {}'.format(self._burn_times)
+        # print 'bt= {}'.format(self._burn_times)
         return sum(self._burn_times) + ((len(self._burn_times) - 1) * 0.5)
 
 
@@ -352,7 +354,8 @@ class StagingManager(object):
 
         if not has_fuel and not self.ctrl.burn_manager.burning:
             with self.fuel_lock:
-                engines_to_decouple = self.ctrl.get_parts_in_decouple_stage(self.ctrl.current_decouple_stage, 'engine')
+                engines_to_decouple = self.ctrl.get_parts_in_decouple_stage(
+                    self.ctrl.current_decouple_stage, 'engine', key=engine_is_active)
                 if engines_to_decouple:
                     all_engines_flameout = not any([self.ctrl.engine_data[part]['has_fuel'] for part in engines_to_decouple])
 

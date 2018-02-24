@@ -5,8 +5,9 @@ from datetime import datetime
 from collections import defaultdict
 from functools import partial
 from itertools import chain
+from copy import copy
 
-from util import SingletonMixin, get_current_stage, get_current_decouple_stage, get_vessel_pitch_heading
+from util import SingletonMixin, get_current_stage, get_current_decouple_stage, get_vessel_pitch_heading, engine_is_active
 from state import PreLaunch, AscentState, CoastToApoapsis, InOrbit, SurfaceHover, TransitionToHover
 from manager import StagingManager, PitchManager, ThrottleManager, BurnManager
 
@@ -62,7 +63,7 @@ class Controller(SingletonMixin, object):
             if self._stream_dict.get(name, None) is None:
                 with self._stream_locks[name]:
                     if self._stream_dict.get(name, None) is None:
-                        print 'opening stream: {}'.format(name)
+                        # print 'opening stream: {}'.format(name)
                         self._stream_dict[name] = self.connection.add_stream(*stream_args)
                         self._streams_open += 1
             return self._stream_dict[name]()
@@ -122,6 +123,16 @@ class Controller(SingletonMixin, object):
                 # self._part_streams[part]['available_thrust'] = self.connection.add_stream(getattr, part.engine, 'available_thrust')
                 # self._part_streams[part]['thrust'] = self.connection.add_stream(getattr, part.engine, 'thrust')
 
+        for stage in range(self.current_stage, -2, -1):
+            # Remove any engines that activate the same stage they decouple (the small srbs used for seperation)
+            stage_parts = copy(self._parts_in_stage['engine'][stage])
+            for part in stage_parts:
+                if part in self._parts_in_decouple_stage['engine'][stage]:
+                    # print 'removing... {}'.format(part)
+                    self._parts_in_decouple_stage['engine'][stage].remove(part)
+                    self._parts_in_stage['engine'][stage].remove(part)
+
+
         # for i in range(max([part.decouple_stage for part in self.vessel.parts.all]), -2, -1):
         #     parts_in_decouple_stage = self.vessel.parts.in_decouple_stage(i)
         #     self._parts_in_decouple_stage['all'][i] = parts_in_decouple_stage
@@ -156,10 +167,9 @@ class Controller(SingletonMixin, object):
         # print self.connection.krpc.paused
         # self.connection.krpc.paused = True
 
-        self._NextStateCls = PreLaunch
-        # self.current_state = PreLaunch()
-        # self.current_state = AscentState()
-        # self.current_state = CoastToApoapsis()
+        # self._NextStateCls = PreLaunch
+        self._NextStateCls = AscentState
+        # self._NextStateCls = CoastToApoapsis
         # self.current_state = TransitionToHover()
         # self._NextStateCls = InOrbit
         #
@@ -278,11 +288,18 @@ class Controller(SingletonMixin, object):
     def set_NextStateCls(self, NextStateCls):
         self._NextStateCls = NextStateCls
 
-    def get_parts_in_stage(self, stage_num, part_type='all'):
+    def get_parts_in_stage(self, stage_num, part_type='all', key=None):
+        # print 'get_parts_in_decouple_stage: {}'.format(part_type)
+        # for x, val in self._parts_in_decouple_stage[part_type].items():
+        #     print '*{} | {}'.format(x, val)
         # print 'get_parts_in_stage: {}'.format(part_type)
-        # for key, val in self._parts_in_stage[part_type].items():
-        #     print '{} | {}'.format(key, val)
-        return self._parts_in_stage[part_type][stage_num]
+        # for x, val in self._parts_in_stage[part_type].items():
+        #     print '^{} | {}'.format(x, val)
+        parts = self._parts_in_stage[part_type][stage_num]
+        if key is not None:
+            # parts = [part for part in parts if try_default(key, args=[part], default=False, exceptions=[krpc.error.RPCError])]
+            parts = [part for part in parts if key(part)]
+        return parts
 
     def all_parts_after_stage(self, stage_num):
         all_stage_parts = []
@@ -290,11 +307,18 @@ class Controller(SingletonMixin, object):
             all_stage_parts.extend(self.get_parts_in_stage(curr_stage))
         return all_stage_parts
 
-    def get_parts_in_decouple_stage(self, stage_num, part_type='all'):
+    def get_parts_in_decouple_stage(self, stage_num, part_type='all', key=None):
         # print 'get_parts_in_decouple_stage: {}'.format(part_type)
-        # for key, val in self._parts_in_decouple_stage[part_type].items():
-        #     print '{} | {}'.format(key, val)
-        return self._parts_in_decouple_stage[part_type][stage_num]
+        # for x, val in self._parts_in_decouple_stage[part_type].items():
+        #     print '*{} | {}'.format(x, val)
+        # print 'get_parts_in_stage: {}'.format(part_type)
+        # for x, val in self._parts_in_stage[part_type].items():
+        #     print '^{} | {}'.format(x, val)
+        parts = self._parts_in_decouple_stage[part_type][stage_num]
+        if key is not None:
+            # parts = [part for part in parts if try_default(key, args=[part], default=False, exceptions=[krpc.error.RPCError])]
+            parts = [part for part in parts if key(part)]
+        return parts
 
     def all_parts_after_decouple_stage(self, stage_num):
         all_decouple_stage_parts = []
@@ -328,15 +352,22 @@ class Controller(SingletonMixin, object):
             isp += part.engine.vacuum_specific_impulse * engine_contrib
         return isp
 
-    def get_resource_mass_for_decouple_stage(self, decouple_stage):
+    def get_resource_mass_for_decouple_stage(self, decouple_stage, resources=('LiquidFuel', 'Oxidizer')):
         resources_in_decouple_stage = self.vessel \
             .resources_in_decouple_stage(decouple_stage, cumulative=False)
 
-        density_lf = resources_in_decouple_stage.density('LiquidFuel')
-        liquid_fuel_in_stage = resources_in_decouple_stage.amount('LiquidFuel')
-        density_ox = resources_in_decouple_stage.density('Oxidizer')
-        oxidizer_in_stage = resources_in_decouple_stage.amount('Oxidizer')
-        return density_lf * liquid_fuel_in_stage + density_ox * oxidizer_in_stage
+        # density_lf = resources_in_decouple_stage.density('LiquidFuel')
+        # liquid_fuel_in_stage = resources_in_decouple_stage.amount('LiquidFuel')
+        # density_ox = resources_in_decouple_stage.density('Oxidizer')
+        # oxidizer_in_stage = resources_in_decouple_stage.amount('Oxidizer')
+        # return density_lf * liquid_fuel_in_stage + density_ox * oxidizer_in_stage
+
+        mass = 0
+        for resource_name in resources:
+            resource_density = resources_in_decouple_stage.density(resource_name)
+            resource_amount = resources_in_decouple_stage.amount(resource_name)
+            mass += resource_density * resource_amount
+        return mass
 
     def get_throttle(self):
         return self.throttle_manager.get_throttle()
@@ -350,28 +381,30 @@ class Controller(SingletonMixin, object):
 
     @property
     def current_stage(self):
-        print
-        print '&&current_stage'
-        for part_type, stages in self._parts_in_stage.items():
-            print part_type
-            for stage, parts in stages.items():
-                print '\t', stage, '|', parts
+        # print
+        # print '&&current_stage'
+        # for part_type, stages in self._parts_in_stage.items():
+        #     print part_type
+        #     for stage, parts in stages.items():
+        #         print '\t', stage, '|', parts
         return self.vessel.control.current_stage
         # return max(chain(*[stages.keys() for part_type, stages in self._parts_in_stage.items()]))
 
     @property
     def current_decouple_stage(self):
-        print
-        print '##current_decouple_stage'
-        for part_type, stages in self._parts_in_decouple_stage.items():
-            print part_type
-            for stage, parts in stages.items():
-                print '\t', stage, '|', parts
+        # print
+        # print '##current_decouple_stage'
+        # for part_type, stages in self._parts_in_decouple_stage.items():
+        #     print part_type
+        #     for stage, parts in stages.items():
+        #         print '\t', stage, '|', parts
         return max(chain(*[stages.keys() for part_type, stages in self._parts_in_decouple_stage.items()]))
 
     def activate_next_stage(self):
         # stage_num = max(self.current_stage, self.current_decouple_stage)
         old_stage_num = self.vessel.control.current_stage
+
+        active_engines_in_stage = [part for part in self._parts_in_stage['engine'][old_stage_num] if part.engine.active]
         # [stages.pop(stage_num, None) for part_type, stages in self._parts_in_stage.items()]
         # [stages.pop(stage_num, None) for part_type, stages in self._parts_in_decouple_stage.items()]
         self.vessel.control.activate_next_stage()
@@ -388,19 +421,20 @@ class Controller(SingletonMixin, object):
 
         # to_print = defaultdict(list)
 
-        for part_type in self._parts_in_stage:
-            for part in self._parts_in_stage[part_type][old_stage_num]:
+        for part in active_engines_in_stage:
+            for part_type in self._parts_in_stage:
                 # if part not in to_print[part.stage]:
                 #     to_print[part.stage].append(part)
+                # print old_stage_num, '|', part, '|', self._parts_in_stage[part_type]
                 if part not in self._parts_in_stage[part_type][part.stage]:
                     self._parts_in_stage[part_type][part.stage].append(part)
 
-        [stages.pop(old_stage_num, None) for part_type, stages in self._parts_in_stage.items()]
-        [stages.pop(new_stage_num, None) for part_type, stages in self._parts_in_decouple_stage.items()]
-
-        print '**STAGE {}'.format(old_stage_num)
+        # print '**STAGE {}'.format(old_stage_num)
         # for key, val in to_print.items():
         #     print key, '**', val
+
+        [stages.pop(old_stage_num, None) for part_type, stages in self._parts_in_stage.items()]
+        [stages.pop(new_stage_num, None) for part_type, stages in self._parts_in_decouple_stage.items()]
 
     def get_local_gravity(self):
         r = self.equatorial_radius

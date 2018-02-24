@@ -190,3 +190,21 @@ def get_burn_time_for_dv(dv, ctrl=None):
 
     return 999999
 
+
+# def try_default(func, args=(), kwargs=None, default=None, exceptions=(Exception,)):
+#     kwargs = {} if kwargs is None else kwargs
+#     try:
+#         return func(*args, **kwargs)
+#     except exceptions:
+#         return default
+
+
+def engine_is_active(part):
+    # print '-==-'
+    # print part
+    engine = part.engine
+    # print engine
+    active = engine.active
+    # print active
+    return active
+
