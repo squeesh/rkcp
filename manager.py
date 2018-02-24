@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import math
 from time import sleep
 from functools import partial
+from util import get_pitch_heading, unit_vector
 
 
 # class CallbackManager(object):
@@ -58,12 +59,21 @@ class PitchManager(object):
                 vessel.auto_pilot.reference_frame = vessel.surface_reference_frame
                 vessel.auto_pilot.target_pitch_and_heading(self.fixed_point_pitch, 90)
             elif follow == self.SURFACE_PROGRADE:
-                if vessel.flight().pitch > 30:
-                    vessel.auto_pilot.reference_frame = vessel.surface_velocity_reference_frame
-                    vessel.auto_pilot.target_direction = (0, 1, 0)
-                else:
-                    vessel.auto_pilot.reference_frame = vessel.surface_reference_frame
-                    vessel.auto_pilot.target_pitch_and_heading(30, 90)
+                # if vessel.flight().pitch > 30:
+                # vessel.auto_pilot.reference_frame = vessel.surface_velocity_reference_frame
+                # vessel.auto_pilot.target_direction = (0, 1, 0)
+
+                velocity_direction = self.ctrl.space_center.transform_direction(
+                    (0, 1, 0), vessel.surface_velocity_reference_frame, vessel.surface_reference_frame)
+
+                pitch, heading = get_pitch_heading(velocity_direction)
+                heading_error = (90 - heading) / 2.0
+                # print 'PITCH: {}'.format(pitch)
+                vessel.auto_pilot.reference_frame = vessel.surface_reference_frame
+                vessel.auto_pilot.target_pitch_and_heading(pitch, 90 + heading_error)
+                # else:
+                #     vessel.auto_pilot.reference_frame = vessel.surface_reference_frame
+                #     vessel.auto_pilot.target_pitch_and_heading(30, 90)
                 # if vessel.auto_pilot.target_roll == 180:
                 #     vessel.auto_pilot.target_pitch_and_heading(flight.pitch + flight.angle_of_attack, 90)
                 # else:

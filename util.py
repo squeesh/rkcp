@@ -1,6 +1,7 @@
 # from multiprocessing import Lock
 from threading import Thread, Lock
 import math
+import numpy as np
 
 
 # class SingletonMetaclass(type):
@@ -105,16 +106,45 @@ def angle_between_vectors(u, v):
     return math.acos(dp / (um*vm)) * (180. / math.pi)
 
 
+def unit_vector(vector):
+    """ Returns the unit vector of the vector.  """
+    print 'VECTOR: {}'.format(vector)
+    return vector / np.linalg.norm(vector)
+
+
 def get_vessel_pitch_heading(vessel):
     vessel_direction = vessel.direction(vessel.surface_reference_frame)
+    return get_pitch_heading(vessel_direction)
+
+    # # Get the direction of the vessel in the horizon plane
+    # horizon_direction = (0, vessel_direction[1], vessel_direction[2])
+    #
+    # # Compute the pitch - the angle between the vessels direction and
+    # # the direction in the horizon plane
+    # pitch = angle_between_vectors(vessel_direction, horizon_direction)
+    # if vessel_direction[0] < 0:
+    #     pitch = -pitch
+    #
+    # # Compute the heading - the angle between north and
+    # # the direction in the horizon plane
+    # north = (0, 1, 0)
+    # heading = angle_between_vectors(north, horizon_direction)
+    # if horizon_direction[2] < 0:
+    #     heading = 360 - heading
+    #
+    # return pitch, heading
+
+
+def get_pitch_heading(unit_vector):
+    # vessel_direction = vessel.direction(vessel.surface_reference_frame)
 
     # Get the direction of the vessel in the horizon plane
-    horizon_direction = (0, vessel_direction[1], vessel_direction[2])
+    horizon_direction = (0, unit_vector[1], unit_vector[2])
 
     # Compute the pitch - the angle between the vessels direction and
     # the direction in the horizon plane
-    pitch = angle_between_vectors(vessel_direction, horizon_direction)
-    if vessel_direction[0] < 0:
+    pitch = angle_between_vectors(unit_vector, horizon_direction)
+    if unit_vector[0] < 0:
         pitch = -pitch
 
     # Compute the heading - the angle between north and
@@ -125,6 +155,7 @@ def get_vessel_pitch_heading(vessel):
         heading = 360 - heading
 
     return pitch, heading
+
 
 def get_dv_needed_for_circularization(ctrl=None):
     if not ctrl:

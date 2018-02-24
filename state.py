@@ -34,6 +34,23 @@ class State(object):
         return self._thread.join()
 
 
+class PreLaunch(State):
+    def run(self):
+        self.ctrl.vessel.control.input_mode = self.ctrl.space_center.ControlInputMode.override
+
+        # Do warning checks here
+        # t_minus = 3
+        # print 'Launch in:'
+        # while t_minus > 0:
+        #     print '{}'.format(t_minus)
+        #     t_minus -= 1
+        #     # sleep(1)
+        #
+        # print 'Lift off!'
+        # print 'setting: {}'.format(AscentState)
+        self.ctrl.set_NextStateCls(AscentState)
+
+
 class AscentState(State):
     ALTITUDE_TURN_START = 250
     ALTITUDE_TARGET = 175000
@@ -97,8 +114,14 @@ class AscentState(State):
                         self.ctrl.pitch_follow = PitchManager.SURFACE_PROGRADE
                     elif self.ctrl.pitch_follow != PitchManager.SURFACE_PROGRADE and math.fabs(self.ctrl.angle_of_attack) > 1.0:
                         self.ctrl.pitch_follow = PitchManager.FIXED_POINT
+                    elif self.ctrl.vessel.flight().pitch < 30:
+                        self.ctrl.pitch_manager.fixed_point_pitch = 30
+                        self.ctrl.pitch_follow = PitchManager.FIXED_POINT
                     else:
                         self.ctrl.pitch_follow = PitchManager.SURFACE_PROGRADE
+                elif self.ctrl.vessel.orbit.time_to_apoapsis < 30.0:
+                    self.ctrl.pitch_manager.fixed_point_pitch = 10
+                    self.ctrl.pitch_follow = PitchManager.FIXED_POINT
                 else:
                     self.ctrl.pitch_follow = PitchManager.ORBIT_PROGRADE
 
@@ -113,7 +136,7 @@ class AscentState(State):
                 # print datetime.now().isoformat()
                 avail_twr = get_avail_twr(self.ctrl)
                 # print datetime.now().isoformat()
-                min_twr = 1.55
+                min_twr = 1.75
                 if throttle_pct * avail_twr > min_twr:
                     self.ctrl.set_throttle(throttle_pct)
                 else:
@@ -135,6 +158,7 @@ class AscentState(State):
                 self.ctrl.set_throttle(0)
 
                 if self.ctrl.altitude > 70000:
+                    self.ctrl.pitch_follow = PitchManager.ORBIT_PROGRADE
                     dv_circ_burn = get_dv_needed_for_circularization(self.ctrl)
                     # burn_time_for_circle = get_burn_time_for_dv(dv_circ_burn, self.ctrl)
                     # burn_start_time = self.ctrl.ut + self.ctrl.time_to_apoapsis - (burn_time_for_circle / 2.0)
@@ -146,6 +170,7 @@ class AscentState(State):
                     print 'burn start: {}'.format(self.ctrl.get_burn_start())
                     print 'burn time: {}'.format(self.ctrl.get_burn_time())
                     self.ctrl.vessel.control.rcs = True
+                    self.ctrl.vessel.auto_pilot.stopping_time = (4.0, 4.0, 4.0)
                     self.ctrl.space_center.warp_to(self.ctrl.get_burn_start() - 20)
                     self.ctrl.set_NextStateCls(CoastToApoapsis)
                     break
@@ -159,15 +184,18 @@ class CoastToApoapsis(State):
     #     self.burn_end_time = self.burn_start_time + self.burn_time_for_circle
 
     def run(self):
-        self.ctrl.pitch_follow = PitchManager.ORBIT_PROGRADE
-        self.ctrl.vessel.auto_pilot.engage()
-        self.ctrl.vessel.auto_pilot.target_roll = 0
+        print 'COAST'
+        # self.ctrl.pitch_follow = PitchManager.ORBIT_PROGRADE
+        # self.ctrl.vessel.auto_pilot.engage()
+        # self.ctrl.vessel.auto_pilot.target_roll = 0
 
         last_second = datetime.now().second
         i = 0
 
         burn_start_time = self.ctrl.get_burn_start()
         while True:
+            self.ctrl.pitch_follow = PitchManager.ORBIT_PROGRADE
+
             i += 1
             curr_second = datetime.now().second
             if curr_second != last_second:
@@ -200,6 +228,7 @@ class CoastToApoapsis(State):
                 # self.ctrl.set_throttle(1.0)
                 # pass
             else:
+                self.ctrl.vessel.auto_pilot.stopping_time = (0.5, 0.5, 0.5)
                 self.ctrl.vessel.control.rcs = False
                 sleep(self.ctrl.get_burn_time() + 5)
                 # self.ctrl.set_throttle(0.0)
@@ -212,7 +241,9 @@ class InOrbit(State):
         pass
 
     def run(self):
-        pass
+        while True:
+            sleep(1)
+        # pass
         # while True:
         #     if self.burn_start_time < self.ctrl.ut < self.burn_end_time:
         #         self.ctrl.space_center.physics_warp_factor = 0

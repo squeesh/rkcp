@@ -7,7 +7,7 @@ from functools import partial
 from itertools import chain
 
 from util import SingletonMixin, get_current_stage, get_current_decouple_stage, get_vessel_pitch_heading
-from state import AscentState, CoastToApoapsis, InOrbit, SurfaceHover, TransitionToHover
+from state import PreLaunch, AscentState, CoastToApoapsis, InOrbit, SurfaceHover, TransitionToHover
 from manager import StagingManager, PitchManager, ThrottleManager, BurnManager
 
 
@@ -156,14 +156,22 @@ class Controller(SingletonMixin, object):
         # print self.connection.krpc.paused
         # self.connection.krpc.paused = True
 
-        self.current_state = AscentState()
+        self._NextStateCls = PreLaunch
+        # self.current_state = PreLaunch()
+        # self.current_state = AscentState()
         # self.current_state = CoastToApoapsis()
         # self.current_state = TransitionToHover()
+        # self._NextStateCls = InOrbit
+        #
+        # self.vessel.auto_pilot.stopping_time = (4.0, 4.0, 4.0)
+        #
+        # self.vessel.control.rcs = True
+        # self.pitch_follow = PitchManager.ORBIT_PROGRADE
+        # self.vessel.auto_pilot.engage()
 
         while True:
             # if not self.current_state._thread.isAlive():
             self.state_condition.acquire()
-            self.state_condition.wait()
 
             NextStateCls = self.get_NextStateCls()
             if NextStateCls is None:
@@ -172,7 +180,10 @@ class Controller(SingletonMixin, object):
             print 'switch state to: ', NextStateCls
             self.current_state = NextStateCls()
 
+            self.state_condition.wait()
             self.state_condition.release()
+
+
 
     @property
     def vessel(self):
