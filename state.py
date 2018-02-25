@@ -24,7 +24,7 @@ class State(object):
     def _run(self):
         self.ctrl.state_condition.acquire()
         self.run()
-        self.ctrl.state_condition.notify()
+        self.ctrl.state_condition.notify_all()
         self.ctrl.state_condition.release()
 
     def run(self):
@@ -65,7 +65,9 @@ class PreLaunch(State):
 
 class AscentState(State):
     ALTITUDE_TURN_START = 250
-    ALTITUDE_TARGET = 175000
+    ALTITUDE_TARGET = 100000
+    # ALTITUDE_TARGET = 2868740  # geostationary
+    # ALTITUDE_TARGET = 11400000  # Mun
     TARGET_ROLL = PreLaunch.TARGET_ROLL
 
     def run(self):
@@ -159,8 +161,8 @@ class AscentState(State):
                 #     out_of_bucket = True
 
             if self.ctrl.apoapsis_altitude < self.ALTITUDE_TARGET:
-                if self.ctrl.apoapsis_altitude >= self.ALTITUDE_TARGET * 0.975:
-                    self.ctrl.set_throttle(0.25)
+                if self.ctrl.apoapsis_altitude >= self.ALTITUDE_TARGET * 0.985:
+                    self.ctrl.set_throttle(0.05)
             else:
                 self.ctrl.set_throttle(0)
 
@@ -254,13 +256,17 @@ class CoastToApoapsis(State):
             #     # self.ctrl.set_throttle(1.0)
             #     # pass
             # else:
-            if self.ctrl.ut > burn_start_time:
+            if self.ctrl.ut > burn_start_time - 4:
+                self.ctrl.vessel.auto_pilot.stopping_time = (2.0, 2.0, 2.0)
+            elif self.ctrl.ut > burn_start_time - 2:
                 self.ctrl.vessel.auto_pilot.stopping_time = (0.5, 0.5, 0.5)
                 self.ctrl.vessel.control.rcs = False
-                # sleep(self.ctrl.get_burn_time() + 5)
-                # # self.ctrl.set_throttle(0.0)
-                # self.ctrl.set_NextStateCls(InOrbit)
-                # break
+            elif self.ctrl.ut > burn_start_time:
+                self.ctrl.burn_manager.condition.acquire()
+                self.ctrl.burn_manager.condition.wait()
+                self.ctrl.burn_manager.condition.release()
+                self.ctrl.set_NextStateCls(InOrbit)
+                break
 
 
 class InOrbit(State):
@@ -269,6 +275,7 @@ class InOrbit(State):
 
     def run(self):
         while True:
+            print 'in orbit!'
             sleep(1)
         # pass
         # while True:

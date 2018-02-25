@@ -1,9 +1,10 @@
-from threading import Thread, Lock
+from threading import Thread, Lock, Condition
 from collections import defaultdict
 from datetime import datetime, timedelta
 import math
 from time import sleep
 from functools import partial
+
 from util import get_pitch_heading, unit_vector, engine_is_active
 
 
@@ -156,10 +157,12 @@ class BurnManager(object):
 
 
     burning = False
+    condition = None
 
     def __init__(self):
         from controller import Controller
         self.ctrl = Controller.get()
+        self.condition = Condition()
         self._thread = Thread(target=self.run)
         self._thread.daemon = True
         self._thread.start()
@@ -175,32 +178,41 @@ class BurnManager(object):
 
         while True:
             if self._burn_start is not None and self._burn_times and self.ctrl.ut > self._burn_start:
+                if self.burning == False:
+                    self.burning = True
+                    self.condition.acquire()
+
                 self.ctrl.throttle_manager.disabled = True
-                self.burning = True
                 self.ctrl.vessel.control.throttle = 1.0
 
                 burn_until = self.ctrl.ut + self._burn_times[0]
-                if len(self._burn_times) > 1:
-                    burn_until += 0.25
+                # if len(self._burn_times) > 1:
+                #     burn_until += 0.25
 
-                expr = conn.krpc.Expression.greater_than(
-                    conn.krpc.Expression.call(ut_call),
-                    conn.krpc.Expression.constant_double(burn_until))
-
-                # Create an event from the expression
-                event = conn.krpc.add_event(expr)
-
-                # Wait on the event
-                with event.condition:
-                    event.wait()
-
-                # sleep(self._burn_times[0])
-                self.ctrl.vessel.control.throttle = 0.0
-                # sleep(0.25)
                 self._burn_times = self._burn_times[1:]
 
                 if len(self._burn_times):
-                    self.ctrl.vessel.control.activate_next_stage()
+                    self.ctrl.staging_manager.condition.acquire()
+                    print 'waiting for burn end'
+                    self.ctrl.staging_manager.condition.wait()
+                    self.ctrl.staging_manager.condition.release()
+                    print 'burn end done'
+                else:
+                    expr = conn.krpc.Expression.greater_than(
+                        conn.krpc.Expression.call(ut_call),
+                        conn.krpc.Expression.constant_double(burn_until))
+
+                    # Create an event from the expression
+                    event = conn.krpc.add_event(expr)
+
+                    # Wait on the event
+                    with event.condition:
+                        event.wait()
+
+                self.ctrl.vessel.control.throttle = 0.0
+
+                if len(self._burn_times):
+                    # self.ctrl.vessel.control.activate_next_stage()
 
                     self._burn_dv = self.get_burn_dv()
                     self._burn_times = self.get_burn_times(self._burn_dv, self.ctrl.current_decouple_stage)
@@ -214,9 +226,7 @@ class BurnManager(object):
                     print 'ut: {}'.format(self.ctrl.ut)
                     print 'bs: {}'.format(self._burn_start)
                     print
-                    # self.ctrl.connection.krpc.paused = True
 
-                    # sleep(0.5)
                 else:
                     self.burning = False
                     self._burn_dv = None
@@ -225,6 +235,8 @@ class BurnManager(object):
                     self._burn_point = None
                     self._burn_point_func = None
                     self._burn_start = None
+                    self.condition.notify_all()
+                    self.condition.release()
 
     # def set_burn_dv(self, val):
     #     self._burn_dv = val
@@ -379,9 +391,13 @@ class BurnManager(object):
 
 
 class StagingManager(object):
+    fuel_lock = None
+    condition = None
+
     def __init__(self):
         from controller import Controller
         self.ctrl = Controller.get()
+        self.condition = Condition()
         self.fuel_lock = Lock()
         self.decouple_stage_activate_next = {}
 
@@ -393,15 +409,19 @@ class StagingManager(object):
     def has_fuel_callback(self, has_fuel, part):
         self.ctrl.engine_data[part]['has_fuel'] = has_fuel
 
-        if not has_fuel and not self.ctrl.burn_manager.burning:
+        if not has_fuel:
             with self.fuel_lock:
                 engines_to_decouple = self.ctrl.get_parts_in_decouple_stage(
                     self.ctrl.current_decouple_stage, 'engine', key=engine_is_active)
+
                 if engines_to_decouple:
                     all_engines_flameout = not any([self.ctrl.engine_data[part]['has_fuel'] for part in engines_to_decouple])
 
                     if all_engines_flameout:
                         already_activated = self.decouple_stage_activate_next.get(self.ctrl.current_decouple_stage, False)
                         if not already_activated:
+                            self.condition.acquire()
                             self.decouple_stage_activate_next[self.ctrl.current_decouple_stage] = True
                             self.ctrl.activate_next_stage()
+                            self.condition.notify_all()
+                            self.condition.release()

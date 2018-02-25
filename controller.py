@@ -404,7 +404,10 @@ class Controller(SingletonMixin, object):
         #     print part_type
         #     for stage, parts in stages.items():
         #         print '\t', stage, '|', parts
-        return max(chain(*[stages.keys() for part_type, stages in self._parts_in_decouple_stage.items()]))
+        print 'cds --->'
+        print '\n'.join(['{} | {}'.format(a, b) for a, b in self._parts_in_decouple_stage.items()])
+
+        return max([key for part_type, stages in self._parts_in_decouple_stage.items() for key, value in stages.items() if value])
 
     def activate_next_stage(self):
         # stage_num = max(self.current_stage, self.current_decouple_stage)
