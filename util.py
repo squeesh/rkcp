@@ -157,19 +157,19 @@ def get_pitch_heading(unit_vector):
     return pitch, heading
 
 
-def get_dv_needed_for_circularization(ctrl=None):
-    if not ctrl:
-        from controller import Controller
-        ctrl = Controller.get()
-
-    # r_ap = current apoapsis radius in meters (and the altitude you will circularize at)
-    r_ap = ctrl.apoapsis
-    # r_pe = current periapsis radius in meters
-    r_pe = ctrl.periapsis
-    # mu = gravitational parameter for the body you are orbiting (3.5316x1012 m3 / s2 for Kerbin)
-    mu = ctrl.vessel.orbit.body.gravitational_parameter
-    # dv_circ_burn = sqrt(mu / r_ap) - sqrt((r_pe * mu) / (r_ap * (r_pe + r_ap) / 2))
-    return math.sqrt(mu / r_ap) - math.sqrt((r_pe * mu) / (r_ap * (r_pe + r_ap) / 2.0))
+# def get_dv_needed_for_circularization(ctrl=None):
+#     if not ctrl:
+#         from controller import Controller
+#         ctrl = Controller.get()
+#
+#     # r_ap = current apoapsis radius in meters (and the altitude you will circularize at)
+#     r_ap = ctrl.apoapsis
+#     # r_pe = current periapsis radius in meters
+#     r_pe = ctrl.periapsis
+#     # mu = gravitational parameter for the body you are orbiting (3.5316x1012 m3 / s2 for Kerbin)
+#     mu = ctrl.vessel.orbit.body.gravitational_parameter
+#     # dv_circ_burn = sqrt(mu / r_ap) - sqrt((r_pe * mu) / (r_ap * (r_pe + r_ap) / 2))
+#     return math.sqrt(mu / r_ap) - math.sqrt((r_pe * mu) / (r_ap * (r_pe + r_ap) / 2.0))
 
 
 def get_burn_time_for_dv(dv, ctrl=None):

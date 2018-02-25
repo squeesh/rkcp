@@ -93,6 +93,7 @@ class ThrottleManager(object):
     _old_throttle = 0
     _throttle = 0
     _throttle_queue = None
+    disabled = False
 
     set_calls = 0
     avg_input = False
@@ -125,15 +126,16 @@ class ThrottleManager(object):
             #     i = 0
             #     last_second = curr_second
 
-            if not self.avg_input:
-                if math.fabs(self._throttle - self._old_throttle) > 0.001:
-                    self.ctrl.vessel.control.throttle = self._throttle
-                    self._old_throttle = self._throttle
-            elif self._throttle_queue:
-                avg = sum(self._throttle_queue) / float(len(self._throttle_queue))
-                self.ctrl.vessel.control.throttle = avg
-                self._throttle_queue = []
-                sleep(0.1)
+            if not self.disabled:
+                if not self.avg_input:
+                    if math.fabs(self._throttle - self._old_throttle) > 0.001:
+                        self.ctrl.vessel.control.throttle = self._throttle
+                        self._old_throttle = self._throttle
+                elif self._throttle_queue:
+                    avg = sum(self._throttle_queue) / float(len(self._throttle_queue))
+                    self.ctrl.vessel.control.throttle = avg
+                    self._throttle_queue = []
+                    sleep(0.1)
 
 
     def get_throttle(self):
@@ -146,6 +148,7 @@ class ThrottleManager(object):
 
 class BurnManager(object):
     _burn_dv = None
+    _burn_dv_func = None
     _burn_times = []
     _burn_point = None
     _burn_start = None
@@ -170,8 +173,9 @@ class BurnManager(object):
 
         while True:
             if self._burn_start is not None and self._burn_times and self.ctrl.ut > self._burn_start:
+                self.ctrl.throttle_manager.disabled = True
                 self.burning = True
-                self.ctrl.set_throttle(1.0)
+                self.ctrl.vessel.control.throttle = 1.0
 
                 burn_until = self.ctrl.ut + self._burn_times[0]
                 if len(self._burn_times) > 1:
@@ -187,30 +191,55 @@ class BurnManager(object):
                 # Wait on the event
                 with event.condition:
                     event.wait()
-                    # print 'Altitude reached 1000m'
 
                 # sleep(self._burn_times[0])
-                self.ctrl.set_throttle(0.0)
-                sleep(0.25)
+                self.ctrl.vessel.control.throttle = 0.0
+                # sleep(0.25)
                 self._burn_times = self._burn_times[1:]
+
                 if len(self._burn_times):
                     self.ctrl.vessel.control.activate_next_stage()
-                    sleep(0.5)
+
+                    self._burn_dv = self.get_burn_dv()
+                    self._burn_times = self.get_burn_times(self._burn_dv, self.ctrl.current_decouple_stage)
+                    self._burn_start = None
+
+                    # this won't work for other things....
+                    self.ctrl.set_burn_point(self.ctrl.ut + self.ctrl.time_to_apoapsis)
+
+                    print
+                    print 'new burn times: {}'.format(self._burn_times)
+                    print 'dv: {}'.format(self._burn_dv)
+                    print 'ut: {}'.format(self.ctrl.ut)
+                    print 'bs: {}'.format(self._burn_start)
+                    print
+                    # self.ctrl.connection.krpc.paused = True
+
+                    # sleep(0.5)
                 else:
                     self.burning = False
                     self._burn_dv = None
+                    self._burn_dv_func = None
                     self._burn_times = []
                     self._burn_point = None
                     self._burn_start = None
 
-    def set_burn_dv(self, val):
-        self._burn_dv = val
-        self._burn_times = self.get_burn_times(val)
-        if not self._burn_start and self._burn_times and self._burn_point is not None:
-            self._burn_start = self._burn_point - self.get_burn_time() / 2.0 + 2.5
+    # def set_burn_dv(self, val):
+    #     self._burn_dv = val
+    #     self._burn_times = self.get_burn_times(val)
+    #     if not self._burn_start and self._burn_times and self._burn_point is not None:
+    #         self._burn_start = self._burn_point - self.get_burn_time() / 2.0 + 2.5
+
+    def set_burn_dv_func(self, func):
+        self._burn_dv_func = func
 
     def set_burn_point(self, val):
         self._burn_point = val
+
+        if not self._burn_times and self._burn_dv_func:
+            self._burn_dv = self._burn_dv_func()
+            self._burn_times = self.get_burn_times(self._burn_dv)
+
         if not self._burn_start and self._burn_times and self._burn_point is not None:
             # print 'ut= {} | bp= {}'.format(self.ctrl.ut, self._burn_point)
             self._burn_start = self._burn_point - self.get_burn_time() / 2.0 + 2.5
@@ -322,12 +351,14 @@ class BurnManager(object):
 
         # hack ... bug is putting Nones into the array... remove them
         print 'burn_times: {}'.format(burn_times)
-        burn_times = [time for time in burn_times if time is not None]
+        burn_times = [time for time in burn_times if (time is not None and time != 0.0)]
         print 'burn_times: {}'.format(burn_times)
         return burn_times
 
     def get_burn_dv(self):
-        return self._burn_dv
+        if self._burn_dv_func is not None:
+            return self._burn_dv_func()
+        return None
 
     def get_burn_start(self):
         return self._burn_start

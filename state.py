@@ -3,7 +3,7 @@ from threading import Thread
 import math
 from datetime import datetime
 
-from util import get_avail_twr, get_dv_needed_for_circularization, get_burn_time_for_dv, get_vessel_pitch_heading
+from util import get_avail_twr, get_burn_time_for_dv, get_vessel_pitch_heading
 from manager import PitchManager
 
 
@@ -166,11 +166,15 @@ class AscentState(State):
 
                 if self.ctrl.altitude > 70000:
                     self.ctrl.pitch_follow = PitchManager.ORBIT_PROGRADE
-                    dv_circ_burn = get_dv_needed_for_circularization(self.ctrl)
+                    # dv_circ_burn = self.get_dv_needed_for_circularization()
                     # burn_time_for_circle = get_burn_time_for_dv(dv_circ_burn, self.ctrl)
                     # burn_start_time = self.ctrl.ut + self.ctrl.time_to_apoapsis - (burn_time_for_circle / 2.0)
+
+                    # self.ctrl.set_burn_dv(dv_circ_burn)
+                    self.ctrl.set_burn_dv_func(self.get_dv_needed_for_circularization)
+                    dv_circ_burn = self.ctrl.get_burn_dv()
+
                     print 'dv needed: {}'.format(dv_circ_burn)
-                    self.ctrl.set_burn_dv(dv_circ_burn)
                     print 'burn point: {}'.format(self.ctrl.ut + self.ctrl.time_to_apoapsis)
                     self.ctrl.set_burn_point(self.ctrl.ut + self.ctrl.time_to_apoapsis)
                     print 'ut:         {}'.format(self.ctrl.ut)
@@ -181,6 +185,17 @@ class AscentState(State):
                     self.ctrl.space_center.warp_to(self.ctrl.get_burn_start() - 20)
                     self.ctrl.set_NextStateCls(CoastToApoapsis)
                     break
+
+    def get_dv_needed_for_circularization(self):
+        # r_ap = current apoapsis radius in meters (and the altitude you will circularize at)
+        r_ap = self.ctrl.apoapsis
+        # r_pe = current periapsis radius in meters
+        r_pe = self.ctrl.periapsis
+        # mu = gravitational parameter for the body you are orbiting (3.5316x1012 m3 / s2 for Kerbin)
+        mu = self.ctrl.vessel.orbit.body.gravitational_parameter
+        # dv_circ_burn = sqrt(mu / r_ap) - sqrt((r_pe * mu) / (r_ap * (r_pe + r_ap) / 2))
+        return math.sqrt(mu / r_ap) - math.sqrt((r_pe * mu) / (r_ap * (r_pe + r_ap) / 2.0))
+
 
 
 class CoastToApoapsis(State):
@@ -221,26 +236,27 @@ class CoastToApoapsis(State):
                 i = 0
                 last_second = curr_second
 
-            # if self.ctrl.time_to_apoapsis > (90 + self.burn_time_for_circle / 2.0 - self.burn_time_for_circle * 0.1):
-            if self.ctrl.ut < burn_start_time - 15:
-                pass
-                # self.ctrl.space_center.rails_warp_factor = 3
-            # elif self.ctrl.time_to_apoapsis > (15 + self.burn_time_for_circle / 2.0 - self.burn_time_for_circle * 0.1):
-            elif self.ctrl.ut < burn_start_time:
-                pass
-                # self.ctrl.space_center.physics_warp_factor = 4
-            # elif self.ctrl.time_to_apoapsis > (self.burn_time_for_circle / 2.0 - self.burn_time_for_circle * 0.1):
-            # elif self.ctrl.burn_manager.burning:
-                # self.ctrl.space_center.physics_warp_factor = 0
-                # self.ctrl.set_throttle(1.0)
-                # pass
-            else:
+            # # if self.ctrl.time_to_apoapsis > (90 + self.burn_time_for_circle / 2.0 - self.burn_time_for_circle * 0.1):
+            # if self.ctrl.ut < burn_start_time - 15:
+            #     pass
+            #     # self.ctrl.space_center.rails_warp_factor = 3
+            # # elif self.ctrl.time_to_apoapsis > (15 + self.burn_time_for_circle / 2.0 - self.burn_time_for_circle * 0.1):
+            # elif self.ctrl.ut < burn_start_time:
+            #     pass
+            #     # self.ctrl.space_center.physics_warp_factor = 4
+            # # elif self.ctrl.time_to_apoapsis > (self.burn_time_for_circle / 2.0 - self.burn_time_for_circle * 0.1):
+            # # elif self.ctrl.burn_manager.burning:
+            #     # self.ctrl.space_center.physics_warp_factor = 0
+            #     # self.ctrl.set_throttle(1.0)
+            #     # pass
+            # else:
+            if self.ctrl.ut > burn_start_time:
                 self.ctrl.vessel.auto_pilot.stopping_time = (0.5, 0.5, 0.5)
                 self.ctrl.vessel.control.rcs = False
-                sleep(self.ctrl.get_burn_time() + 5)
-                # self.ctrl.set_throttle(0.0)
-                self.ctrl.set_NextStateCls(InOrbit)
-                break
+                # sleep(self.ctrl.get_burn_time() + 5)
+                # # self.ctrl.set_throttle(0.0)
+                # self.ctrl.set_NextStateCls(InOrbit)
+                # break
 
 
 class InOrbit(State):

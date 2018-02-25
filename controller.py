@@ -267,8 +267,11 @@ class Controller(SingletonMixin, object):
     # def equatorial_radius(self):
     #     return self._equatorial_radius()
 
-    def set_burn_dv(self, delta_v):
-        self.burn_manager.set_burn_dv(delta_v)
+    # def set_burn_dv(self, delta_v):
+    #     self.burn_manager.set_burn_dv(delta_v)
+
+    def set_burn_dv_func(self, func):
+        self.burn_manager.set_burn_dv_func(func)
 
     def set_burn_point(self, point_in_time):
         self.burn_manager.set_burn_point(point_in_time)
