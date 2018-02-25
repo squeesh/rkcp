@@ -273,6 +273,9 @@ class Controller(SingletonMixin, object):
     def set_burn_dv_func(self, func):
         self.burn_manager.set_burn_dv_func(func)
 
+    def set_burn_point_func(self, func):
+        self.burn_manager.set_burn_point_func(func)
+
     def set_burn_point(self, point_in_time):
         self.burn_manager.set_burn_point(point_in_time)
 

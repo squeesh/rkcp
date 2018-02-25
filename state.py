@@ -173,10 +173,11 @@ class AscentState(State):
                     # self.ctrl.set_burn_dv(dv_circ_burn)
                     self.ctrl.set_burn_dv_func(self.get_dv_needed_for_circularization)
                     dv_circ_burn = self.ctrl.get_burn_dv()
+                    self.ctrl.set_burn_point_func(self.get_circularization_burn_point)
+                    self.ctrl.set_burn_point(self.get_circularization_burn_point())
 
                     print 'dv needed: {}'.format(dv_circ_burn)
-                    print 'burn point: {}'.format(self.ctrl.ut + self.ctrl.time_to_apoapsis)
-                    self.ctrl.set_burn_point(self.ctrl.ut + self.ctrl.time_to_apoapsis)
+                    print 'burn point: {}'.format(self.get_circularization_burn_point())
                     print 'ut:         {}'.format(self.ctrl.ut)
                     print 'burn start: {}'.format(self.ctrl.get_burn_start())
                     print 'burn time: {}'.format(self.ctrl.get_burn_time())
@@ -195,6 +196,9 @@ class AscentState(State):
         mu = self.ctrl.vessel.orbit.body.gravitational_parameter
         # dv_circ_burn = sqrt(mu / r_ap) - sqrt((r_pe * mu) / (r_ap * (r_pe + r_ap) / 2))
         return math.sqrt(mu / r_ap) - math.sqrt((r_pe * mu) / (r_ap * (r_pe + r_ap) / 2.0))
+
+    def get_circularization_burn_point(self):
+        return self.ctrl.ut + self.ctrl.time_to_apoapsis
 
 
 

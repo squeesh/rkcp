@@ -151,7 +151,9 @@ class BurnManager(object):
     _burn_dv_func = None
     _burn_times = []
     _burn_point = None
+    _burn_point_func = None
     _burn_start = None
+
 
     burning = False
 
@@ -204,8 +206,7 @@ class BurnManager(object):
                     self._burn_times = self.get_burn_times(self._burn_dv, self.ctrl.current_decouple_stage)
                     self._burn_start = None
 
-                    # this won't work for other things....
-                    self.ctrl.set_burn_point(self.ctrl.ut + self.ctrl.time_to_apoapsis)
+                    self.ctrl.set_burn_point(self.get_burn_point())
 
                     print
                     print 'new burn times: {}'.format(self._burn_times)
@@ -222,6 +223,7 @@ class BurnManager(object):
                     self._burn_dv_func = None
                     self._burn_times = []
                     self._burn_point = None
+                    self._burn_point_func = None
                     self._burn_start = None
 
     # def set_burn_dv(self, val):
@@ -232,6 +234,9 @@ class BurnManager(object):
 
     def set_burn_dv_func(self, func):
         self._burn_dv_func = func
+
+    def set_burn_point_func(self, func):
+        self._burn_point_func = func
 
     def set_burn_point(self, val):
         self._burn_point = val
@@ -358,6 +363,11 @@ class BurnManager(object):
     def get_burn_dv(self):
         if self._burn_dv_func is not None:
             return self._burn_dv_func()
+        return None
+
+    def get_burn_point(self):
+        if self._burn_point_func is not None:
+            return self._burn_point_func()
         return None
 
     def get_burn_start(self):
