@@ -167,8 +167,10 @@ class Controller(SingletonMixin, object):
         # print self.connection.krpc.paused
         # self.connection.krpc.paused = True
 
-        # self._NextStateCls = PreLaunch
-        self._NextStateCls = AscentState
+        if self.vessel.situation == self.space_center.VesselSituation.pre_launch:
+            self._NextStateCls = PreLaunch
+        else:
+            self._NextStateCls = AscentState
         # self._NextStateCls = CoastToApoapsis
         # self.current_state = TransitionToHover()
         # self._NextStateCls = InOrbit
@@ -307,10 +309,10 @@ class Controller(SingletonMixin, object):
             parts = [part for part in parts if key(part)]
         return parts
 
-    def all_parts_after_stage(self, stage_num):
+    def all_parts_after_stage(self, stage_num, part_type='all', key=None):
         all_stage_parts = []
         for curr_stage in range(stage_num, -2, -1):
-            all_stage_parts.extend(self.get_parts_in_stage(curr_stage))
+            all_stage_parts.extend(self.get_parts_in_stage(curr_stage, part_type=part_type, key=key))
         return all_stage_parts
 
     def get_parts_in_decouple_stage(self, stage_num, part_type='all', key=None):
@@ -326,10 +328,10 @@ class Controller(SingletonMixin, object):
             parts = [part for part in parts if key(part)]
         return parts
 
-    def all_parts_after_decouple_stage(self, stage_num):
+    def all_parts_after_decouple_stage(self, stage_num, part_type='all', key=None):
         all_decouple_stage_parts = []
         for curr_decouple_stage in range(stage_num, -2, -1):
-            all_decouple_stage_parts.extend(self.get_parts_in_decouple_stage(curr_decouple_stage))
+            all_decouple_stage_parts.extend(self.get_parts_in_decouple_stage(curr_decouple_stage, part_type=part_type, key=key))
         return all_decouple_stage_parts
 
     def get_available_thrust(self, part):
@@ -358,20 +360,23 @@ class Controller(SingletonMixin, object):
             isp += part.engine.vacuum_specific_impulse * engine_contrib
         return isp
 
+    # def get_resource_mass_for_stage(self, stage, resources=('LiquidFuel', 'Oxidizer')):
+    #     resources_in_stage = self.vessel.resources_in_stage(stage, cumulative=False)
+    #     mass = 0
+    #     for resource_name in resources:
+    #         resource_density = resources_in_stage.density(resource_name)
+    #         resource_amount = resources_in_stage.amount(resource_name)
+    #         mass += resource_density * resource_amount
+    #     return mass
+
     def get_resource_mass_for_decouple_stage(self, decouple_stage, resources=('LiquidFuel', 'Oxidizer')):
         resources_in_decouple_stage = self.vessel \
             .resources_in_decouple_stage(decouple_stage, cumulative=False)
-
-        # density_lf = resources_in_decouple_stage.density('LiquidFuel')
-        # liquid_fuel_in_stage = resources_in_decouple_stage.amount('LiquidFuel')
-        # density_ox = resources_in_decouple_stage.density('Oxidizer')
-        # oxidizer_in_stage = resources_in_decouple_stage.amount('Oxidizer')
-        # return density_lf * liquid_fuel_in_stage + density_ox * oxidizer_in_stage
-
         mass = 0
         for resource_name in resources:
             resource_density = resources_in_decouple_stage.density(resource_name)
             resource_amount = resources_in_decouple_stage.amount(resource_name)
+            print resource_name, '|', resource_amount
             mass += resource_density * resource_amount
         return mass
 
@@ -404,9 +409,6 @@ class Controller(SingletonMixin, object):
         #     print part_type
         #     for stage, parts in stages.items():
         #         print '\t', stage, '|', parts
-        print 'cds --->'
-        print '\n'.join(['{} | {}'.format(a, b) for a, b in self._parts_in_decouple_stage.items()])
-
         return max([key for part_type, stages in self._parts_in_decouple_stage.items() for key, value in stages.items() if value])
 
     def activate_next_stage(self):

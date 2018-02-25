@@ -58,14 +58,12 @@ class PreLaunch(State):
 
         self.ctrl.activate_next_stage()
 
-
-
         self.ctrl.set_NextStateCls(AscentState)
 
 
 class AscentState(State):
     ALTITUDE_TURN_START = 250
-    ALTITUDE_TARGET = 100000
+    ALTITUDE_TARGET = 175000
     # ALTITUDE_TARGET = 2868740  # geostationary
     # ALTITUDE_TARGET = 11400000  # Mun
     TARGET_ROLL = PreLaunch.TARGET_ROLL

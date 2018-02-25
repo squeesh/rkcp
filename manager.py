@@ -155,7 +155,6 @@ class BurnManager(object):
     _burn_point_func = None
     _burn_start = None
 
-
     burning = False
     condition = None
 
@@ -186,16 +185,17 @@ class BurnManager(object):
                 self.ctrl.vessel.control.throttle = 1.0
 
                 burn_until = self.ctrl.ut + self._burn_times[0]
-                # if len(self._burn_times) > 1:
-                #     burn_until += 0.25
-
                 self._burn_times = self._burn_times[1:]
 
                 if len(self._burn_times):
-                    self.ctrl.staging_manager.condition.acquire()
                     print 'waiting for burn end'
-                    self.ctrl.staging_manager.condition.wait()
-                    self.ctrl.staging_manager.condition.release()
+                    self.ctrl.staging_manager.pre_stage.acquire()
+                    self.ctrl.staging_manager.post_stage.acquire()
+                    self.ctrl.staging_manager.pre_stage.wait()
+                    self.ctrl.staging_manager.pre_stage.release()
+                    self.ctrl.vessel.control.throttle = 0.0
+                    self.ctrl.staging_manager.post_stage.wait()
+                    self.ctrl.staging_manager.post_stage.release()
                     print 'burn end done'
                 else:
                     expr = conn.krpc.Expression.greater_than(
@@ -215,7 +215,7 @@ class BurnManager(object):
                     # self.ctrl.vessel.control.activate_next_stage()
 
                     self._burn_dv = self.get_burn_dv()
-                    self._burn_times = self.get_burn_times(self._burn_dv, self.ctrl.current_decouple_stage)
+                    self._burn_times = self.get_burn_times(self._burn_dv, self.ctrl.current_stage)
                     self._burn_start = None
 
                     self.ctrl.set_burn_point(self.get_burn_point())
@@ -258,48 +258,33 @@ class BurnManager(object):
             self._burn_times = self.get_burn_times(self._burn_dv)
 
         if not self._burn_start and self._burn_times and self._burn_point is not None:
-            # print 'ut= {} | bp= {}'.format(self.ctrl.ut, self._burn_point)
-            self._burn_start = self._burn_point - self.get_burn_time() / 2.0 + 2.5
+            self._burn_start = self._burn_point - self.get_burn_time() * 0.4
 
-    def get_dv_in_decouple_stage(self, decouple_stage):
+    def get_dv_in_stage(self, stage):
         g = 9.8
 
-        engines_in_decouple_stage = self.ctrl.get_parts_in_decouple_stage(decouple_stage, 'engine')
-        print '== engs dcs: {}'.format(engines_in_decouple_stage)
-        engine_stages = [part.stage for part in engines_in_decouple_stage]
-        print '== engs stg: {}'.format(engine_stages)
-        engines = []
-        for stage in engine_stages:
-            engines.extend(self.ctrl.get_parts_in_stage(stage, 'engine'))
+        print '== stg: {}'.format(stage)
+        active_engines = self.ctrl.get_parts_in_stage(
+            self.ctrl.current_stage,
+            'engine',
+            key=lambda part: part.engine.active and part.decouple_stage < stage
+        )
+        decouple_stage = max([part.decouple_stage for part in (active_engines + self.ctrl.all_parts_after_stage(stage, 'engine'))])
+        print '== decoup: {}'.format(decouple_stage)
+        engines = list(set(
+            active_engines +
+            self.ctrl.all_parts_after_decouple_stage(
+                decouple_stage, 'engine', key=lambda part: part.engine.active or part.stage == stage)
+        ))
 
         print '== engs: {}'.format(engines)
-
-        # total_thrust = sum([part.engine.max_thrust for part in engines])
-        # isp = 0
-        # for part in engines:
-        #     engine_contrib = part.engine.max_thrust / total_thrust
-        #     isp += part.engine.vacuum_specific_impulse * engine_contrib
 
         isp = self.ctrl.get_isp_for_engines(engines)
         print '== isp: {}'.format(isp)
 
-        # resources_in_decouple_stage = self.ctrl.vessel \
-        #     .resources_in_decouple_stage(decouple_stage, cumulative=False)
-        #
-        # liquid_fuel_in_stage = resources_in_decouple_stage.amount('LiquidFuel')
-        # oxidizer_in_stage = resources_in_decouple_stage.amount('Oxidizer')
-        # fuel_mass_in_stage = liquid_fuel_in_stage + oxidizer_in_stage
-
         fuel_mass_in_stage = self.ctrl.get_resource_mass_for_decouple_stage(decouple_stage)
         print '== fuel in stg: {}'.format(fuel_mass_in_stage)
 
-        # all_stage_parts = self.ctrl.all_parts_after_stage(decouple_stage)
-        # for sub_decouple_stage in range(decouple_stage, -2, -1):
-        #     all_stage_parts.extend(self.ctrl.get_parts_in_decouple_stage(sub_decouple_stage))
-
-        # all_stage_mass = sum([part.mass for part in self.ctrl.all_parts_after_stage(decouple_stage)])
-
-        # m_i = self.ctrl.mass
         m_i = sum([part.mass for part in self.ctrl.all_parts_after_decouple_stage(decouple_stage)])
         print '== m_i: {}'.format(m_i)
         m_f = m_i - fuel_mass_in_stage
@@ -313,35 +298,34 @@ class BurnManager(object):
         # print 'final mass: ', m_f
 
         output = math.log(m_i / m_f) * isp * g
-        print '== out: {} | {}'.format(decouple_stage, output)
+        print '== out: {} | {}'.format(stage, output)
         return output
 
-    def get_burn_times(self, dv, decouple_stage=None):
-        if decouple_stage is None:
-            decouple_stage = self.ctrl.current_decouple_stage
+    def get_burn_times(self, dv, stage=None):
+        if stage is None:
+            stage = self.ctrl.current_stage
 
-        def get_burn_time_for_decouple_stage(current_dv, current_decouple_stage):
-            print '--cds: {}'.format(current_decouple_stage)
-            print '--curr stg: {}'.format(self.ctrl.current_stage)
-            print '--curr dsg: {}'.format(self.ctrl.current_decouple_stage)
-            # print 'cdv: ', current_dv, '|', current_decouple_stage
-            engines_in_decouple_stage = self.ctrl.get_parts_in_decouple_stage(current_decouple_stage, 'engine')
-            print '--decoup eng: {}'.format(engines_in_decouple_stage)
+        def get_burn_time_for_stage(current_dv, current_stage):
+            active_engines = self.ctrl.get_parts_in_stage(
+                self.ctrl.current_stage,
+                'engine',
+                key=lambda part: part.engine.active and part.decouple_stage < current_stage
+            )
+            decouple_stage = max(
+                [part.decouple_stage for part in (active_engines + self.ctrl.all_parts_after_stage(current_stage, 'engine'))])
+            print '--decoup: {}'.format(decouple_stage)
+            engines = list(set(
+                active_engines +
+                self.ctrl.all_parts_after_decouple_stage(
+                    decouple_stage, 'engine', key=lambda part: part.engine.active or part.stage == current_stage)
+            ))
 
-            engine_stages = [part.stage for part in engines_in_decouple_stage]
-            print '--eng stage: {}'.format(engine_stages)
-
-            engines = []
-            for stage in engine_stages:
-                engines.extend(self.ctrl.get_parts_in_stage(stage, 'engine'))
             print '--engs: {}'.format(engines)
 
             isp = self.ctrl.get_isp_for_engines(engines)
             print '--isp: {}'.format(isp)
-            m_i = sum([part.mass for part in self.ctrl.all_parts_after_decouple_stage(current_decouple_stage)])
+            m_i = sum([part.mass for part in self.ctrl.all_parts_after_decouple_stage(decouple_stage)])
             print '--mass: {} | {}'.format(self.ctrl.mass, m_i)
-            # isp = self.ctrl.specific_impulse
-            # f = self.ctrl.available_thrust
             f = self.ctrl.get_thrust_for_engines(engines)
             print '--f: {}'.format(f)
             g = 9.8  # This is a constant, not -> self.ctrl.surface_gravity
@@ -356,14 +340,14 @@ class BurnManager(object):
 
         burn_times = []
         c_dv = dv
-        for c_ds in range(decouple_stage, -2, -1):
-            d_ds = self.get_dv_in_decouple_stage(c_ds)
+        for c_ds in range(stage, -2, -1):
+            d_ds = self.get_dv_in_stage(c_ds)
             print 'c_ds: {} c_dv: {} d_ds: {}'.format(c_ds, c_dv, d_ds)
             if c_dv > d_ds:
-                burn_times.append(get_burn_time_for_decouple_stage(d_ds, c_ds))
+                burn_times.append(get_burn_time_for_stage(d_ds, c_ds))
                 c_dv -= d_ds
             else:
-                burn_times.append(get_burn_time_for_decouple_stage(c_dv, c_ds))
+                burn_times.append(get_burn_time_for_stage(c_dv, c_ds))
                 break
 
         # hack ... bug is putting Nones into the array... remove them
@@ -386,18 +370,21 @@ class BurnManager(object):
         return self._burn_start
 
     def get_burn_time(self):
-        # print 'bt= {}'.format(self._burn_times)
+        if not self._burn_times:
+            return 0
         return sum(self._burn_times) + ((len(self._burn_times) - 1) * 0.5)
 
 
 class StagingManager(object):
     fuel_lock = None
-    condition = None
+    pre_stage = None
+    post_stage = None
 
     def __init__(self):
         from controller import Controller
         self.ctrl = Controller.get()
-        self.condition = Condition()
+        self.pre_stage = Condition()
+        self.post_stage = Condition()
         self.fuel_lock = Lock()
         self.decouple_stage_activate_next = {}
 
@@ -420,8 +407,14 @@ class StagingManager(object):
                     if all_engines_flameout:
                         already_activated = self.decouple_stage_activate_next.get(self.ctrl.current_decouple_stage, False)
                         if not already_activated:
-                            self.condition.acquire()
+                            self.pre_stage.acquire()
+                            sleep(0.1)
+                            self.pre_stage.notify_all()
+                            self.pre_stage.release()
                             self.decouple_stage_activate_next[self.ctrl.current_decouple_stage] = True
                             self.ctrl.activate_next_stage()
-                            self.condition.notify_all()
-                            self.condition.release()
+                            self.post_stage.acquire()
+                            sleep(0.1)
+                            self.post_stage.notify_all()
+                            self.post_stage.release()
+
