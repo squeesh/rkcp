@@ -153,10 +153,14 @@ class BurnManager(object):
     _burn_times = []
     _burn_point = None
     _burn_point_func = None
-    _burn_start = None
 
     burning = False
     condition = None
+
+    burn_dv = None
+    burn_start = None
+    burn_point = None
+    burn_time = None
 
     def __init__(self):
         from controller import Controller
@@ -176,73 +180,75 @@ class BurnManager(object):
         # Create an expression on the server
 
         while True:
-            if self._burn_start is not None and self._burn_times and self.ctrl.ut > self._burn_start:
-                if self.burning == False:
-                    self.burning = True
-                    self.condition.acquire()
+            if self._burn_times:
+                if self.ctrl.ut > self._get_burn_start():
+                    if self.burning == False:
+                        self.burning = True
+                        self.condition.acquire()
 
-                self.ctrl.throttle_manager.disabled = True
-                self.ctrl.vessel.control.throttle = 1.0
+                    self.ctrl.throttle_manager.disabled = True
+                    self.ctrl.vessel.control.throttle = 1.0
 
-                burn_until = self.ctrl.ut + self._burn_times[0]
-                self._burn_times = self._burn_times[1:]
+                    burn_until = self.ctrl.ut + self._burn_times[0]
+                    print 'pre bt: {}'.format(self._burn_times)
+                    self._burn_times = self._burn_times[1:]
+                    print 'pst bt: {}'.format(self._burn_times)
 
-                if len(self._burn_times):
-                    print 'waiting for burn end'
-                    self.ctrl.staging_manager.pre_stage.acquire()
-                    self.ctrl.staging_manager.post_stage.acquire()
-                    self.ctrl.staging_manager.pre_stage.wait()
-                    self.ctrl.staging_manager.pre_stage.release()
+                    if len(self._burn_times):
+                        print 'waiting for burn end'
+                        self.ctrl.staging_manager.pre_stage.acquire()
+                        self.ctrl.staging_manager.post_stage.acquire()
+                        self.ctrl.staging_manager.pre_stage.wait()
+                        self.ctrl.staging_manager.pre_stage.release()
+                        self.ctrl.vessel.control.throttle = 0.0
+                        self.ctrl.staging_manager.post_stage.wait()
+                        self.ctrl.staging_manager.post_stage.release()
+                        print 'burn end done'
+                    else:
+                        expr = conn.krpc.Expression.greater_than(
+                            conn.krpc.Expression.call(ut_call),
+                            conn.krpc.Expression.constant_double(burn_until))
+
+                        # Create an event from the expression
+                        event = conn.krpc.add_event(expr)
+
+                        # Wait on the event
+                        with event.condition:
+                            event.wait()
+
                     self.ctrl.vessel.control.throttle = 0.0
-                    self.ctrl.staging_manager.post_stage.wait()
-                    self.ctrl.staging_manager.post_stage.release()
-                    print 'burn end done'
-                else:
-                    expr = conn.krpc.Expression.greater_than(
-                        conn.krpc.Expression.call(ut_call),
-                        conn.krpc.Expression.constant_double(burn_until))
 
-                    # Create an event from the expression
-                    event = conn.krpc.add_event(expr)
+                    if len(self._burn_times):
+                        # self.ctrl.vessel.control.activate_next_stage()
+                        if len(self._burn_times) > 1 and self._burn_dv_func is not None and self._burn_point_func is not None:
+                            self._burn_times = self._get_burn_times(self._get_burn_dv())
 
-                    # Wait on the event
-                    with event.condition:
-                        event.wait()
+                            # self.ctrl.set_burn_point(self.get_burn_point())
+                            print
+                            print 'new burn times: {}'.format(self._burn_times)
+                            print 'dv: {}'.format(self.burn_dv)
+                            print 'ut: {}'.format(self.ctrl.ut)
+                            print 'bs: {}'.format(self.burn_start)
+                            print
 
-                self.ctrl.vessel.control.throttle = 0.0
+            elif self.burning:
+                self.burning = False
+                self._burn_dv = None
+                self._burn_dv_func = None
+                self._burn_times = []
+                self._burn_point = None
+                self._burn_point_func = None
+                self.burn_dv = None
+                self.burn_start = None
+                self.burn_point = None
+                self.burn_time = None
+                self.condition.notify_all()
+                self.condition.release()
+                print "BURN DONE!!!"
 
-                if len(self._burn_times):
-                    # self.ctrl.vessel.control.activate_next_stage()
-
-                    self._burn_dv = self.get_burn_dv()
-                    self._burn_times = self.get_burn_times(self._burn_dv, self.ctrl.current_stage)
-                    self._burn_start = None
-
-                    self.ctrl.set_burn_point(self.get_burn_point())
-
-                    print
-                    print 'new burn times: {}'.format(self._burn_times)
-                    print 'dv: {}'.format(self._burn_dv)
-                    print 'ut: {}'.format(self.ctrl.ut)
-                    print 'bs: {}'.format(self._burn_start)
-                    print
-
-                else:
-                    self.burning = False
-                    self._burn_dv = None
-                    self._burn_dv_func = None
-                    self._burn_times = []
-                    self._burn_point = None
-                    self._burn_point_func = None
-                    self._burn_start = None
-                    self.condition.notify_all()
-                    self.condition.release()
-
-    # def set_burn_dv(self, val):
-    #     self._burn_dv = val
-    #     self._burn_times = self.get_burn_times(val)
-    #     if not self._burn_start and self._burn_times and self._burn_point is not None:
-    #         self._burn_start = self._burn_point - self.get_burn_time() / 2.0 + 2.5
+    def set_burn_dv(self, val):
+        self._burn_dv = val
+        self._burn_times = self._get_burn_times(val)
 
     def set_burn_dv_func(self, func):
         self._burn_dv_func = func
@@ -253,14 +259,7 @@ class BurnManager(object):
     def set_burn_point(self, val):
         self._burn_point = val
 
-        if not self._burn_times and self._burn_dv_func:
-            self._burn_dv = self._burn_dv_func()
-            self._burn_times = self.get_burn_times(self._burn_dv)
-
-        if not self._burn_start and self._burn_times and self._burn_point is not None:
-            self._burn_start = self._burn_point - self.get_burn_time() * 0.4
-
-    def get_dv_in_stage(self, stage):
+    def _get_dv_in_stage(self, stage):
         g = 9.8
 
         print '== stg: {}'.format(stage)
@@ -301,9 +300,8 @@ class BurnManager(object):
         print '== out: {} | {}'.format(stage, output)
         return output
 
-    def get_burn_times(self, dv, stage=None):
-        if stage is None:
-            stage = self.ctrl.current_stage
+    def _get_burn_times(self, dv):
+        stage = self.ctrl.current_stage
 
         def get_burn_time_for_stage(current_dv, current_stage):
             active_engines = self.ctrl.get_parts_in_stage(
@@ -341,7 +339,7 @@ class BurnManager(object):
         burn_times = []
         c_dv = dv
         for c_ds in range(stage, -2, -1):
-            d_ds = self.get_dv_in_stage(c_ds)
+            d_ds = self._get_dv_in_stage(c_ds)
             print 'c_ds: {} c_dv: {} d_ds: {}'.format(c_ds, c_dv, d_ds)
             if c_dv > d_ds:
                 burn_times.append(get_burn_time_for_stage(d_ds, c_ds))
@@ -356,23 +354,32 @@ class BurnManager(object):
         print 'burn_times: {}'.format(burn_times)
         return burn_times
 
-    def get_burn_dv(self):
+    def _get_burn_dv(self):
         if self._burn_dv_func is not None:
-            return self._burn_dv_func()
-        return None
+            self.burn_dv = self._burn_dv_func()
+        else:
+            self.burn_dv = self._burn_dv
+        return self.burn_dv
 
-    def get_burn_point(self):
+    def _get_burn_point(self):
         if self._burn_point_func is not None:
-            return self._burn_point_func()
-        return None
+            self.burn_point = self._burn_point_func()
+        else:
+            self.burn_point = self._burn_point or self.ctrl.ut
+        return self.burn_point
 
-    def get_burn_start(self):
-        return self._burn_start
-
-    def get_burn_time(self):
+    def _get_burn_start(self):
         if not self._burn_times:
-            return 0
-        return sum(self._burn_times) + ((len(self._burn_times) - 1) * 0.5)
+            self._burn_times = self._get_burn_times(self._get_burn_dv())
+        self.burn_start = self._get_burn_point() - self._get_burn_time() * 0.4
+        return self.burn_start
+
+    def _get_burn_time(self):
+        if not self._burn_times:
+            self.burn_time = 0
+        else:
+            self.burn_time = sum(self._burn_times) + ((len(self._burn_times) - 1) * 0.5)
+        return self.burn_time
 
 
 class StagingManager(object):

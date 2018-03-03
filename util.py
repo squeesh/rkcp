@@ -106,6 +106,26 @@ def angle_between_vectors(u, v):
     return math.acos(dp / (um*vm)) * (180. / math.pi)
 
 
+def angle_between(v1, v2):
+    # https://stackoverflow.com/questions/2827393/angles-between-two-n-dimensional-vectors-in-python
+    # http://citadel.sjfc.edu/faculty/kgreen/vector/block1/vectors/node22.html
+    """ Returns the angle in radians between vectors 'v1' and 'v2'::
+            >>> angle_between((1, 0, 0), (0, 1, 0))
+            1.5707963267948966
+            >>> angle_between((1, 0, 0), (1, 0, 0))
+            0.0
+            >>> angle_between((1, 0, 0), (-1, 0, 0))
+            3.141592653589793
+    """
+    v1_u = unit_vector(v1)
+    v2_u = unit_vector(v2)
+    cross_prod_y = np.cross(v1, v2)[1]
+    output = np.arccos(np.dot(np.array(v1_u), np.array(v2_u)))
+    if cross_prod_y < 0:
+        output = 2 * math.pi - output
+    return output
+
+
 def unit_vector(vector):
     """ Returns the unit vector of the vector.  """
     print 'VECTOR: {}'.format(vector)

@@ -281,14 +281,24 @@ class Controller(SingletonMixin, object):
     def set_burn_point(self, point_in_time):
         self.burn_manager.set_burn_point(point_in_time)
 
-    def get_burn_dv(self):
-        return self.burn_manager.get_burn_dv()
+    @property
+    def burn_dv(self):
+        return self.burn_manager.burn_dv
+
+    @property
+    def burn_point(self):
+        return self.burn_manager.burn_point
+
+    @property
+    def burn_start(self):
+        return self.burn_manager.burn_start
 
     def get_burn_start(self):
-        return self.burn_manager.get_burn_start()
+        return self.burn_manager._get_burn_start()
 
-    def get_burn_time(self):
-        return self.burn_manager.get_burn_time()
+    @property
+    def burn_time(self):
+        return self.burn_manager.burn_time
 
     def get_NextStateCls(self):
         return self._NextStateCls
