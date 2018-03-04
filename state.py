@@ -63,15 +63,14 @@ class PreLaunch(State):
 
 class AscentState(State):
     ALTITUDE_TURN_START = 100
-    ALTITUDE_TARGET = 100000
+    ALTITUDE_TARGET = 175000
     # ALTITUDE_TARGET = 2868740  # geostationary
     # ALTITUDE_TARGET = 11400000  # Mun
     # ALTITUDE_TARGET = 46400000  # Minmus
-    TARGET_ROLL = PreLaunch.TARGET_ROLL
 
     def run(self):
         self.ctrl.vessel.auto_pilot.engage()
-        self.ctrl.vessel.auto_pilot.target_roll = self.TARGET_ROLL
+        self.ctrl.vessel.auto_pilot.target_roll = PreLaunch.TARGET_ROLL
 
         twr = self.ctrl.get_avail_twr()
         if twr < 1.0:
@@ -211,16 +210,15 @@ class CoastToApoapsis(State):
     #     self.burn_end_time = self.burn_start_time + self.burn_time_for_circle
 
     def run(self):
-        self.ctrl.pitch_follow = PitchManager.ORBIT_PROGRADE
+        burn_condition_aquired = False
         print 'COAST'
-        # self.ctrl.pitch_follow = PitchManager.ORBIT_PROGRADE
-        # self.ctrl.vessel.auto_pilot.engage()
-        # self.ctrl.vessel.auto_pilot.target_roll = 0
+        self.ctrl.pitch_follow = PitchManager.ORBIT_PROGRADE
+        self.ctrl.vessel.auto_pilot.engage()
+        self.ctrl.vessel.auto_pilot.target_roll = PreLaunch.TARGET_ROLL
 
         last_second = datetime.now().second
         i = 0
 
-        burn_start_time = self.ctrl.get_burn_start()
         while True:
             i += 1
             curr_second = datetime.now().second
@@ -254,18 +252,24 @@ class CoastToApoapsis(State):
             #     # self.ctrl.set_throttle(1.0)
             #     # pass
             # else:
-            if self.ctrl.ut > burn_start_time - 4:
-                self.ctrl.vessel.auto_pilot.stopping_time = (2.0, 2.0, 2.0)
-            elif self.ctrl.ut > burn_start_time - 2:
-                self.ctrl.vessel.auto_pilot.stopping_time = (0.5, 0.5, 0.5)
-                self.ctrl.vessel.control.rcs = False
-            elif self.ctrl.ut > burn_start_time:
-                self.ctrl.burn_manager.condition.acquire()
-                self.ctrl.burn_manager.condition.wait()
-                self.ctrl.burn_manager.condition.release()
-                # Maybe some conditional logic here to choose where to go?
-                self.ctrl.set_NextStateCls(CoastToInterceptBurn)
-                break
+            if self.ctrl.burn_start:
+                if self.ctrl.ut < self.ctrl.burn_start - 4:
+                    self.ctrl.vessel.auto_pilot.stopping_time = (2.0, 2.0, 2.0)
+                elif self.ctrl.ut < self.ctrl.burn_start - 2:
+                    if not burn_condition_aquired:
+                        print 'CoastToApoapsis acquire...'
+                        self.ctrl.burn_manager.condition.acquire()
+                        burn_condition_aquired = True
+                    self.ctrl.vessel.auto_pilot.stopping_time = (0.5, 0.5, 0.5)
+                    self.ctrl.vessel.control.rcs = False
+                elif self.ctrl.ut >= self.ctrl.burn_start:
+                    print 'CoastToApoapsis waiting...'
+                    self.ctrl.burn_manager.condition.wait()
+                    self.ctrl.burn_manager.condition.release()
+                    print 'CoastToApoapsis release...'
+                    # Maybe some conditional logic here to choose where to go?
+                    self.ctrl.set_NextStateCls(InOrbit)
+                    break
 
 
 class InOrbit(State):
@@ -273,9 +277,11 @@ class InOrbit(State):
         pass
 
     def run(self):
-        while True:
-            print 'in orbit!'
-            sleep(1)
+        self.ctrl.set_NextStateCls(CoastToInterceptBurn)
+
+        # while True:
+        #     print 'in orbit!'
+        #     sleep(1)
         # pass
         # while True:
         #     if self.burn_start_time < self.ctrl.ut < self.burn_end_time:
@@ -294,12 +300,16 @@ class CoastToInterceptBurn(State):
         self.target_body = self.ctrl.space_center.bodies['Mun']
 
     def run(self):
+        self.ctrl.target_body = self.target_body
+
         self.ctrl.pitch_follow = PitchManager.ORBIT_PROGRADE
+        self.ctrl.vessel.auto_pilot.engage()
+        self.ctrl.vessel.auto_pilot.target_roll = 0
 
         vessel = self.ctrl.vessel
         # space_center = self.ctrl.space_center
 
-        orb_flight = vessel.flight(self.ctrl.active_body.non_rotating_reference_frame)
+        # orb_flight = vessel.flight(self.ctrl.body.non_rotating_reference_frame)
         # surf_flight = vessel.flight(self.ctrl.active_body.reference_frame)
         mun = self.target_body
         kerbin = self.active_body
@@ -335,6 +345,7 @@ class CoastToInterceptBurn(State):
         # print 'bt: ', burn_time
         # print 'ub: ', seconds_until_burn
 
+
         self.ctrl.set_burn_dv(math.sqrt(mu / r1) * (math.sqrt(2 * r2 / (r1 + r2)) - 1))
         self.ctrl.set_burn_point(self.ctrl.ut + seconds_until_burn)
 
@@ -368,19 +379,15 @@ class CoastToInterceptBurn(State):
 
 class BurnToBody(State):
     def run(self):
-        self.ctrl.pitch_follow = PitchManager.ORBIT_PROGRADE
         print 'BurnToBody'
-        # self.ctrl.pitch_follow = PitchManager.ORBIT_PROGRADE
-        # self.ctrl.vessel.auto_pilot.engage()
-        # self.ctrl.vessel.auto_pilot.target_roll = 0
+        self.ctrl.pitch_follow = PitchManager.ORBIT_PROGRADE
+        self.ctrl.vessel.auto_pilot.engage()
+        self.ctrl.vessel.auto_pilot.target_roll = 0
 
         last_second = datetime.now().second
         i = 0
 
-
-        burn_start_time = self.ctrl.get_burn_start()
         while True:
-
             i += 1
             curr_second = datetime.now().second
             if curr_second != last_second:
@@ -390,25 +397,107 @@ class BurnToBody(State):
                 print 'follow:', self.ctrl.pitch_follow
                 print 'apoapsis:', self.ctrl.apoapsis_altitude
                 print 'periapsis:', self.ctrl.periapsis_altitude
-                print 'dv:', self.ctrl.get_burn_dv()
-                print 'bt:', self.ctrl.get_burn_time()
-                print 'bs:', self.ctrl.get_burn_start()
+                print 'dv:', self.ctrl.burn_dv
+                print 'bt:', self.ctrl.burn_time
+                print 'bs:', self.ctrl.burn_start
                 print 'ut:', self.ctrl.ut
                 # print 'be:', self.burn_end_time
 
                 i = 0
                 last_second = curr_second
 
-            if self.ctrl.ut > burn_start_time - 4:
+            if self.ctrl.ut < self.ctrl.burn_start - 4:
                 self.ctrl.vessel.auto_pilot.stopping_time = (2.0, 2.0, 2.0)
-            elif self.ctrl.ut > burn_start_time - 2:
+            elif self.ctrl.ut < self.ctrl.burn_start - 2:
                 self.ctrl.vessel.auto_pilot.stopping_time = (0.5, 0.5, 0.5)
                 self.ctrl.vessel.control.rcs = False
-            elif self.ctrl.ut > burn_start_time:
+            elif self.ctrl.ut >= self.ctrl.burn_start:
                 self.ctrl.burn_manager.condition.acquire()
                 self.ctrl.burn_manager.condition.wait()
                 self.ctrl.burn_manager.condition.release()
-                # self.ctrl.set_NextStateCls(InOrbit)
+                self.ctrl.set_NextStateCls(EnrouteToTarget)
+                break
+
+
+class EnrouteToTarget(State):
+    ALTITUDE_TARGET = 15000
+
+    def run(self):
+        print 'EnrouteToTarget'
+
+        self.ctrl.vessel.auto_pilot.engage()
+
+        orbit = self.ctrl.vessel.orbit.next_orbit
+
+        periapsis_alt = self.ctrl.connection.add_stream(getattr, orbit, 'periapsis_altitude')
+
+        if periapsis_alt() > self.ALTITUDE_TARGET:
+            if orbit.inclination < math.pi / 2.0:
+                self.ctrl.pitch_follow = PitchManager.ORBIT_PROGRADE
+            else:
+                self.ctrl.pitch_follow = PitchManager.ORBIT_RETROGRADE
+        else:
+            # Need to face opposite direction since we are trying to INCREASE periapsis
+            if orbit.inclination < math.pi / 2.0:
+                self.ctrl.pitch_follow = PitchManager.ORBIT_RETROGRADE
+            else:
+                self.ctrl.pitch_follow = PitchManager.ORBIT_PROGRADE
+
+        self.ctrl.target_body = self.ctrl.space_center.bodies['Mun']
+
+        self.ctrl.vessel.auto_pilot.wait()
+        sleep(10.0)
+        self.ctrl.vessel.auto_pilot.wait()
+        print 'facing direction'
+
+        TEST_DIST = 100000.0
+
+        last_second = datetime.now().second
+        i = 0
+
+        while True:
+            i += 1
+            curr_second = datetime.now().second
+            if curr_second != last_second:
+                # orbit = self.ctrl.target_body.orbit
+
+                print
+                print 'tks:', i
+                # print 'body:', self.ctrl.target_body.name
+                # print 'alt:', self.ctrl.altitude
+                # print 'follow:', self.ctrl.pitch_follow
+                # print 'radius:', self.ctrl.target_body.equatorial_radius
+                # print 'closest:', orbit.distance_at_closest_approach(self.ctrl.vessel) - self.ctrl.target_body.equatorial_radius
+                # print 'periapsis:', orbit.periapsis_altitude
+                # print 'eccentricity:', orbit.eccentricity
+                # print 'inclination:', orbit.inclination
+                # print 'dv:', self.ctrl.burn_dv
+                # print 'bt:', self.ctrl.burn_time
+                # print 'bs:', self.ctrl.burn_start
+                # print 'ut:', self.ctrl.ut
+                # print 'be:', self.burn_end_time
+
+                i = 0
+                last_second = curr_second
+
+            if periapsis_alt() > self.ALTITUDE_TARGET:
+                dist_from_tgt_alt = math.fabs(periapsis_alt() - self.ALTITUDE_TARGET)
+
+                throttle_pct = dist_from_tgt_alt / TEST_DIST if dist_from_tgt_alt < TEST_DIST else 1.0
+                if throttle_pct < 0.02:
+                    throttle_pct = 0.02
+
+                self.ctrl.vessel.control.throttle = throttle_pct
+            elif periapsis_alt() < self.ALTITUDE_TARGET * 0.75:
+                dist_from_tgt_alt = math.fabs(periapsis_alt() - self.ALTITUDE_TARGET * 0.75)
+
+                throttle_pct = dist_from_tgt_alt / TEST_DIST if dist_from_tgt_alt < TEST_DIST else 1.0
+                if throttle_pct < 0.02:
+                    throttle_pct = 0.02
+
+                self.ctrl.vessel.control.throttle = throttle_pct
+            else:
+                self.ctrl.vessel.control.throttle = 0.0
                 break
 
 

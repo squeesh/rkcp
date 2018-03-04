@@ -8,7 +8,8 @@ from itertools import chain
 from copy import copy
 
 from util import SingletonMixin, get_current_stage, get_current_decouple_stage, get_vessel_pitch_heading, engine_is_active
-from state import PreLaunch, AscentState, CoastToApoapsis, InOrbit, SurfaceHover, TransitionToHover
+from state import PreLaunch, AscentState, CoastToApoapsis, InOrbit, CoastToInterceptBurn, SurfaceHover, TransitionToHover, \
+    EnrouteToTarget
 from manager import StagingManager, PitchManager, ThrottleManager, BurnManager
 
 
@@ -22,6 +23,7 @@ class Controller(SingletonMixin, object):
     _NextStateCls = None  # Expected class object hence the camel case
 
     _parts_in_stage = None
+    _target_body = None
 
     def __init__(self):
         super(Controller, self).__init__()
@@ -169,17 +171,13 @@ class Controller(SingletonMixin, object):
 
         if self.vessel.situation == self.space_center.VesselSituation.pre_launch:
             self._NextStateCls = PreLaunch
+        elif self.vessel.situation == self.space_center.VesselSituation.orbiting:
+            self._NextStateCls = CoastToInterceptBurn
         else:
             self._NextStateCls = AscentState
-        # self._NextStateCls = CoastToApoapsis
-        # self.current_state = TransitionToHover()
-        # self._NextStateCls = InOrbit
-        #
-        # self.vessel.auto_pilot.stopping_time = (4.0, 4.0, 4.0)
-        #
-        # self.vessel.control.rcs = True
-        # self.pitch_follow = PitchManager.ORBIT_PROGRADE
-        # self.vessel.auto_pilot.engage()
+
+        # self._NextStateCls = TransitionToHover
+        # self._NextStateCls = EnrouteToTarget
 
         while True:
             # if not self.current_state._thread.isAlive():
@@ -269,8 +267,8 @@ class Controller(SingletonMixin, object):
     # def equatorial_radius(self):
     #     return self._equatorial_radius()
 
-    # def set_burn_dv(self, delta_v):
-    #     self.burn_manager.set_burn_dv(delta_v)
+    def set_burn_dv(self, delta_v):
+        self.burn_manager.set_burn_dv(delta_v)
 
     def set_burn_dv_func(self, func):
         self.burn_manager.set_burn_dv_func(func)
@@ -299,6 +297,18 @@ class Controller(SingletonMixin, object):
     @property
     def burn_time(self):
         return self.burn_manager.burn_time
+
+    @property
+    def target_body(self):
+        if self._target_body is None:
+            return self.body
+        return self._target_body
+
+    @target_body.setter
+    def target_body(self, value):
+        if value == self.body:
+            value = None
+        self._target_body = value
 
     def get_NextStateCls(self):
         return self._NextStateCls

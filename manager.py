@@ -35,7 +35,8 @@ class PitchManager(object):
     FIXED_POINT = 1
     SURFACE_PROGRADE = 2
     ORBIT_PROGRADE = 3
-    CUSTOM_PITCH_HEADING = 4
+    ORBIT_RETROGRADE = 4
+    CUSTOM_PITCH_HEADING = 5
     curr_follow = FIXED_UP
 
     custom_pitch_heading = (90, 90)
@@ -85,6 +86,12 @@ class PitchManager(object):
                 flight = vessel.flight()
                 vessel.auto_pilot.reference_frame = vessel.surface_reference_frame
                 vessel.auto_pilot.target_direction = flight.prograde
+            elif follow == self.ORBIT_RETROGRADE:
+                # orb_prograde, _ = get_pitch_heading(flight.prograde)
+                # vessel.auto_pilot.target_pitch_and_heading(orb_prograde, 90)
+                flight = vessel.flight()
+                vessel.auto_pilot.reference_frame = vessel.surface_reference_frame
+                vessel.auto_pilot.target_direction = flight.retrograde
             elif follow == self.CUSTOM_PITCH_HEADING:
                 vessel.auto_pilot.reference_frame = vessel.surface_reference_frame
                 vessel.auto_pilot.target_pitch_and_heading(*self.custom_pitch_heading)
@@ -184,6 +191,7 @@ class BurnManager(object):
                 if self.ctrl.ut > self._get_burn_start():
                     if self.burning == False:
                         self.burning = True
+                        print 'burn acquire ...'
                         self.condition.acquire()
 
                     self.ctrl.throttle_manager.disabled = True
@@ -242,7 +250,9 @@ class BurnManager(object):
                 self.burn_start = None
                 self.burn_point = None
                 self.burn_time = None
+                print 'burn notify_all ...'
                 self.condition.notify_all()
+                print 'burn release ...'
                 self.condition.release()
                 print "BURN DONE!!!"
 
