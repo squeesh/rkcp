@@ -504,8 +504,9 @@ class BurnManager(Manager):
     def set_burn_point_func(self, func):
         self._burn_point_func = func
 
-    def set_burn_stop_event(self, event):
-        self._burn_stop_event = event
+    def burn_halt(self):
+        self._throttle_disabled = True
+        self.ctrl.vessel.control.throttle = 0.0
 
     def _get_dv_in_stage(self, stage):
         g = 9.8
