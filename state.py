@@ -57,7 +57,8 @@ class PreLaunch(State):
         self.ctrl.vessel.auto_pilot.target_pitch_and_heading(90, 90)
         self.ctrl.vessel.auto_pilot.target_roll = self.TARGET_ROLL
 
-        self.ctrl.activate_next_stage()
+        if self.ctrl.body.name == 'Kerbin':
+            self.ctrl.activate_next_stage()
 
         self.ctrl.set_NextStateCls(AscentState)
 
@@ -148,7 +149,13 @@ class AscentState(State):
 
             elif self.ctrl.altitude >= self.ALTITUDE_TURN_START:
                 if self.ctrl.altitude < 40000:
-                    if self.ctrl.mach < 0.65:
+                    if self.ctrl.mach == 0.0:
+                        # No atmo case...
+                        if self.ctrl.altitude < 5000:
+                            self.ctrl.pitch_follow = PitchManager.FIXED_POINT
+                        else:
+                            self.ctrl.pitch_follow = PitchManager.SURFACE_PROGRADE
+                    elif self.ctrl.mach < 0.65:
                         self.ctrl.pitch_follow = PitchManager.FIXED_POINT
                     elif self.ctrl.velocity_pitch < 25.0 and self.ctrl.pitch < 26.0:
                         self.ctrl.pitch_manager.fixed_point_pitch = 25.0

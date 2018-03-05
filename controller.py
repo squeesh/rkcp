@@ -184,6 +184,8 @@ class Controller(SingletonMixin, object):
 
         if self.vessel.situation == self.space_center.VesselSituation.pre_launch:
             self._NextStateCls = PreLaunch
+        elif self.vessel.situation == self.space_center.VesselSituation.landed:
+            self._NextStateCls = PreLaunch
         elif self.vessel.situation == self.space_center.VesselSituation.orbiting:
             self._NextStateCls = CoastToInterceptBurn
         else:
