@@ -7,10 +7,10 @@ from functools import partial
 from itertools import chain
 from copy import copy
 
-from util import SingletonMixin, get_current_stage, get_current_decouple_stage, get_vessel_pitch_heading, engine_is_active
+from util import SingletonMixin, get_current_stage, get_current_decouple_stage, get_vessel_pitch_heading, engine_is_active, get_pitch_heading
 from state import PreLaunch, AscentState, CoastToApoapsis, InOrbit, CoastToInterceptBurn, SurfaceHover, TransitionToHover, \
     EnrouteToTarget
-from manager import StagingManager, PitchManager, ThrottleManager, BurnManager
+from manager import StagingManager, PitchManager, ThrottleManager, BurnManager, EventManager
 
 
 class Controller(SingletonMixin, object):
@@ -42,8 +42,14 @@ class Controller(SingletonMixin, object):
         stream_funcs = (
             ('surface_altitude', (getattr, self.vessel.flight(), 'surface_altitude')),
             ('vertical_speed', (getattr, self.vessel.flight(self.body.reference_frame), 'vertical_speed')),
-
-            ('mach', (getattr, self.vessel.flight(), 'mach')),
+            ('velocity_direction', (
+                self.space_center.transform_direction,
+                (0, 1, 0),
+                self.vessel.surface_velocity_reference_frame,
+                self.vessel.surface_reference_frame)
+             ),
+            # ('mach', (getattr, self.vessel.flight(), 'mach')),
+            ('pitch', (getattr, self.vessel.flight(), 'pitch')),
             ('angle_of_attack', (getattr, self.vessel.flight(), 'angle_of_attack')),
             ('mass', (getattr, self.vessel, 'mass')),
             ('specific_impulse', (getattr, self.vessel, 'specific_impulse')),
@@ -65,7 +71,7 @@ class Controller(SingletonMixin, object):
             if self._stream_dict.get(name, None) is None:
                 with self._stream_locks[name]:
                     if self._stream_dict.get(name, None) is None:
-                        # print 'opening stream: {}'.format(name)
+                        print 'opening stream: {}'.format(name)
                         self._stream_dict[name] = self.connection.add_stream(*stream_args)
                         self._streams_open += 1
             return self._stream_dict[name]()
@@ -143,7 +149,14 @@ class Controller(SingletonMixin, object):
         #         if part.engine:
         #             self._parts_in_decouple_stage['engine'][i].append(part)
 
+    def event_test(self):
+        print "I'M AN EVENT! LOOK AT ME!"
+
     def run(self):
+        self.event_manager = EventManager()
+
+        self.event_manager.subscribe('StagingManager.pre_stage', self.event_test)
+
         self.staging_manager = StagingManager()
         self.pitch_manager = PitchManager()
         self.throttle_manager = ThrottleManager()
@@ -215,10 +228,21 @@ class Controller(SingletonMixin, object):
     def altitude(self):
         return self._altitude()
 
-    # @property
-    # def mach(self):
-    #     return self._mach()
-    #
+    @property
+    def velocity_pitch(self):
+        velocity_pitch, _ = get_pitch_heading(self.velocity_direction)
+        return velocity_pitch
+
+    @property
+    def velocity_heading(self):
+        _, velocity_heading = get_pitch_heading(self.velocity_direction)
+        return velocity_heading
+
+    @property
+    def mach(self):
+        return 0
+        # return self._mach()
+
     # @property
     # def angle_of_attack(self):
     #     return self._angle_of_attack()
@@ -292,11 +316,14 @@ class Controller(SingletonMixin, object):
         return self.burn_manager.burn_start
 
     def get_burn_start(self):
-        return self.burn_manager._get_burn_start()
+        return self.burn_start
 
     @property
     def burn_time(self):
         return self.burn_manager.burn_time
+
+    def get_burn_time(self):
+        return self.burn_time
 
     @property
     def target_body(self):
