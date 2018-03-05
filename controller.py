@@ -48,7 +48,7 @@ class Controller(SingletonMixin, object):
                 self.vessel.surface_velocity_reference_frame,
                 self.vessel.surface_reference_frame)
              ),
-            # ('mach', (getattr, self.vessel.flight(), 'mach')),
+            ('mach', (getattr, self.vessel.flight(), 'mach')),
             ('pitch', (getattr, self.vessel.flight(), 'pitch')),
             ('angle_of_attack', (getattr, self.vessel.flight(), 'angle_of_attack')),
             ('mass', (getattr, self.vessel, 'mass')),
@@ -240,8 +240,7 @@ class Controller(SingletonMixin, object):
 
     @property
     def mach(self):
-        return 0
-        # return self._mach()
+        return self._mach()
 
     # @property
     # def angle_of_attack(self):
