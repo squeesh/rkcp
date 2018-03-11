@@ -2,6 +2,8 @@
 from threading import Thread, Lock
 import math
 import numpy as np
+from sympy import Ellipse, Circle, Point
+from sympy.geometry import intersection
 
 
 # class SingletonMetaclass(type):
@@ -261,20 +263,25 @@ def find_true_impact_time(vessel, ctrl=None):
         from controller import Controller
         ctrl = Controller.get()
 
+    base_ut = ctrl.ut
+
     ReferenceFrame = ctrl.space_center.ReferenceFrame
 
     ref_frame = ctrl.body.reference_frame
-    flight = vessel.flight(ref_frame)
+    period = ctrl.rotational_period
+    # flight = vessel.flight(ref_frame)
 
-    base_time = get_seconds_to_impact(math.fabs(flight.speed) * 1.1, flight.surface_altitude, ctrl=ctrl)
-    probe_time = base_time
+    base_time, base_pos = get_sphere_impact_time_pos(ctrl)
+    # base_time = 59223.4067737
+    base_time += 5
+    # base_time = get_seconds_to_impact(math.fabs(flight.speed) * 1.1, flight.surface_altitude, ctrl=ctrl)
+    probe_time = base_time - base_ut
 
     resolution_params = (
-        (30.0, 15000),
-        (10.0, 5000),
-        (1.0,  500),
-        (0.1,  50),
-        (0.01, 5),
+        (5.0,  500),
+        (1.0,  100),
+        (0.1,  10),
+        (0.01, 1),
     )
     resolution_param_index = 0
 
@@ -282,20 +289,30 @@ def find_true_impact_time(vessel, ctrl=None):
 
     prev_probe_time = probe_time
 
+    # body_rot = math.pi * probe_time / period
+    # futr_ref_frame = ReferenceFrame.create_relative(ref_frame, rotation=(0, math.sin(body_rot), 0, math.cos(body_rot)))
+    #
+    # probe_pos = vessel.orbit.position_at(base_time, ref_frame)
+    # # probe_pos_alt = ctrl.body.altitude_at_position(probe_pos, ref_frame)
+    # probe_lat = ctrl.body.latitude_at_position(probe_pos, futr_ref_frame)
+    # probe_lng = ctrl.body.longitude_at_position(probe_pos, futr_ref_frame)
+
+    print 'grrr'
+
     i = 0
     while True:
-        probe_pos = vessel.orbit.position_at(ctrl.ut + probe_time, ref_frame)
-        probe_pos_alt = ctrl.body.altitude_at_position(probe_pos, ref_frame)
-
-        body_rot = math.pi * probe_time / ctrl.body.rotational_period
+        body_rot = math.pi * probe_time / period
         futr_ref_frame = ReferenceFrame.create_relative(ref_frame, rotation=(0, math.sin(body_rot), 0, math.cos(body_rot)))
+
+        probe_pos = vessel.orbit.position_at(base_ut + probe_time, ref_frame)
+        probe_pos_alt = ctrl.body.altitude_at_position(probe_pos, ref_frame)
 
         probe_lat = ctrl.body.latitude_at_position(probe_pos, futr_ref_frame)
         probe_lng = ctrl.body.longitude_at_position(probe_pos, futr_ref_frame)
 
         surf_height = ctrl.body.surface_height(probe_lat, probe_lng)
 
-        if probe_pos_alt - surf_height < height_resolution:
+        if surf_height - probe_pos_alt < height_resolution:
             probe_time = prev_probe_time
             resolution_param_index += 1
 
@@ -305,12 +322,14 @@ def find_true_impact_time(vessel, ctrl=None):
             time_resolution, height_resolution = resolution_params[resolution_param_index]
 
         prev_probe_time = probe_time
-        probe_time += time_resolution
+        probe_time -= time_resolution
         i += 1
 
     x1, y1, z1 = ctrl.body.surface_position(probe_lat, probe_lng, ref_frame)
     x2, y2, z2 = vessel.position(ref_frame)
 
+    print lat_lng_str(probe_lat, probe_lng)
+    print 'i: ', i
     return probe_time, math.sqrt((x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2), probe_pos, futr_ref_frame
 
 
@@ -371,6 +390,24 @@ def to_min_sec_str(sec):
     return '{}m {}.{}s'.format(minutes, seconds, mili)
 
 
+def lat_lng_str(cur_lat, cur_lng):
+    def to_hms(x):
+        x = math.fabs(x)
+        hours = int(x)
+        minutes = int((x - hours) * 60)
+        seconds = int(((((x - hours) * 60) - minutes) * 60) * 1000) / 1000.0
+        return hours, minutes, seconds
+
+    lat_str = '{}h {}m {}s'.format(*to_hms(cur_lat))
+    if cur_lat < 0:
+        lat_str = '-' + lat_str
+    lng_str = '{}h {}m {}s'.format(*to_hms(cur_lng))
+    if cur_lng < 0:
+        lng_str = '-' + lng_str
+
+    return lat_str, lng_str
+
+
 def rotate_vector(vector, theta, axis):
     vector = np.asarray(vector)
     # axis = [axis[0], -axis[1], axis[2]]
@@ -393,3 +430,42 @@ def rotate_vector(vector, theta, axis):
         ])
 
     return np.dot(rotation_matrix(axis, theta), vector)
+
+
+def get_sphere_impact_time_pos(ctrl):
+    curr_theta = ctrl.true_anomaly
+
+    # r = ctrl.equatorial_radius
+    a = ctrl.semi_major_axis
+    b = ctrl.semi_minor_axis
+    c = math.sqrt(a ** 2 - b ** 2)  # linear eccentricity
+    #
+    # elp = Ellipse(Point(c, 0), a, b)
+    # crc = Circle(Point(0, 0), r)
+    # int_sec = sorted(list(set([(float(point.x), float(point.y)) for point in elp.intersection(crc)])))
+    int_sec = ctrl.sphere_impact_points
+
+    theta_list = []
+
+    def calc_true_anaomly(x, focii, periapsis):
+        x_to_p = float(x.distance(periapsis))
+        x_to_f = float(x.distance(focii))
+        p_to_f = a - c
+        output = math.acos((x_to_f ** 2 + p_to_f ** 2 - x_to_p ** 2) / (2.0 * x_to_f * p_to_f))
+        if x.y < 0:
+            output = -output
+        return output
+
+    periapsis = Point(a - c, 0)
+
+    for imp_point in int_sec:
+        # I think the math.pi part is incorrect, perhaps this doesn't handel oblique triangles
+        theta = math.pi - calc_true_anaomly(Point(*imp_point), Point(0, 0), periapsis) - 2 * math.pi
+        if theta >= curr_theta:
+            theta_list.append(theta)
+
+    theta_f = sorted(theta_list)[0]
+    impact_time = ctrl.orbit.ut_at_true_anomaly(theta_f)
+    impact_pos = ctrl.orbit.position_at(impact_time, ctrl.body.non_rotating_reference_frame)
+    return impact_time, impact_pos
+

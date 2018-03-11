@@ -6,6 +6,8 @@ from collections import defaultdict
 from functools import partial
 from itertools import chain
 from copy import copy
+import math
+from sympy import Ellipse, Circle, Point
 
 from util import SingletonMixin, get_current_stage, get_current_decouple_stage, get_vessel_pitch_heading, engine_is_active, get_pitch_heading
 from state import PreLaunch, AscentState, CoastToApoapsis, InOrbit, CoastToInterceptBurn, SurfaceHover, TransitionToHover, \
@@ -62,10 +64,14 @@ class Controller(SingletonMixin, object):
             ('apoapsis', (getattr, self.orbit, 'apoapsis')),
             ('periapsis', (getattr, self.orbit, 'periapsis')),
             ('radius', (getattr, self.orbit, 'radius')),
+            ('semi_major_axis', (getattr, self.orbit, 'semi_major_axis')),
+            ('semi_minor_axis', (getattr, self.orbit, 'semi_minor_axis')),
+            ('true_anomaly', (getattr, self.orbit, 'true_anomaly')),
 
             ('surface_gravity', (getattr, self.body, 'surface_gravity')),
             ('equatorial_radius', (getattr, self.body, 'equatorial_radius')),
             ('body_mass', (getattr, self.body, 'mass')),
+            ('rotational_period', (getattr, self.body, 'rotational_period')),
         )
 
         self.G = self.space_center.g
@@ -86,24 +92,16 @@ class Controller(SingletonMixin, object):
             setattr(self.__class__, name, property(func))
             self._stream_locks[name] = Lock()
 
-        # self._mach = self.connection.add_stream(getattr, self.vessel.flight(), 'mach')
-        # self._angle_of_attack = self.connection.add_stream(getattr, self.vessel.flight(), 'angle_of_attack')
-        # self._mass = self.connection.add_stream(getattr, self.vessel, 'mass')
-        # self._specific_impulse = self.connection.add_stream(getattr, self.vessel, 'specific_impulse')
-        # self._available_thrust = self.connection.add_stream(getattr, self.vessel, 'available_thrust')
-        # self._thrust = self.connection.add_stream(getattr, self.vessel, 'thrust')
+        # def val_changed_callback(val, attr_name, ctrl):
+        #     setattr(ctrl, attr_name, val)
         #
-        # self._time_to_apoapsis = self.connection.add_stream(getattr, self.orbit, 'time_to_apoapsis')
-        # self._apoapsis_altitude = self.connection.add_stream(getattr, self.orbit, 'apoapsis_altitude')
-        # self._periapsis_altitude = self.connection.add_stream(getattr, self.orbit, 'periapsis_altitude')
-        # self._apoapsis = self.connection.add_stream(getattr, self.orbit, 'apoapsis')
-        # self._periapsis = self.connection.add_stream(getattr, self.orbit, 'periapsis')
+        # change_callback_funcs = (
+        # )
         #
-        # self._surface_gravity = self.connection.add_stream(getattr, self.body, 'surface_gravity')
-        # self._equatorial_radius = self.connection.add_stream(getattr, self.body, 'equatorial_radius')
-
-        # self.current_stage = get_current_stage(self.vessel)
-        # self.current_decouple_stage = get_current_decouple_stage(self.vessel)
+        # for attr_name, callback_args in change_callback_funcs:
+        #     callback_stream = self.connection.add_stream(*callback_args)
+        #     callback_stream.add_callback(partial(val_changed_callback, attr_name=attr_name, ctrl=self))
+        #     callback_stream.start()
 
         self._parts_in_stage = {
             'all': defaultdict(list),
@@ -346,6 +344,32 @@ class Controller(SingletonMixin, object):
         if value == self.body:
             value = None
         self._target_body = value
+
+    @property
+    def sphere_impact_points(self):
+        impact_points = getattr(self, '_impact_points', None)
+
+        print round(self.semi_major_axis, 2)
+        if impact_points:
+            # TODO should include semi minor too
+            """Invalid ellipse on change of semi major axis"""
+            if round(self.semi_major_axis, 2) != round(self._impact_sma, 2):
+                impact_points = None
+                print 'invalid!'
+
+        if impact_points is None:
+            print 'create!'
+            self._impact_sma = self.semi_major_axis
+
+            r = self.equatorial_radius
+            a = self.semi_major_axis
+            b = self.semi_minor_axis
+            c = math.sqrt(a ** 2 - b ** 2)  # linear eccentricity
+
+            elp = Ellipse(Point(c, 0), a, b)
+            crc = Circle(Point(0, 0), r)
+            self._impact_points = sorted(list(set([(float(point.x), float(point.y)) for point in elp.intersection(crc)])))
+        return self._impact_points
 
     def get_NextStateCls(self):
         return self._NextStateCls
