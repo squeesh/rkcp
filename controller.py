@@ -9,7 +9,7 @@ from copy import copy
 
 from util import SingletonMixin, get_current_stage, get_current_decouple_stage, get_vessel_pitch_heading, engine_is_active, get_pitch_heading
 from state import PreLaunch, AscentState, CoastToApoapsis, InOrbit, CoastToInterceptBurn, SurfaceHover, TransitionToHover, \
-    EnrouteToTarget
+    EnrouteToTarget, Descent, SuicideBurn
 from manager import StagingManager, PitchManager, ThrottleManager, BurnManager, EventManager
 
 
@@ -61,10 +61,14 @@ class Controller(SingletonMixin, object):
             ('periapsis_altitude', (getattr, self.orbit, 'periapsis_altitude')),
             ('apoapsis', (getattr, self.orbit, 'apoapsis')),
             ('periapsis', (getattr, self.orbit, 'periapsis')),
+            ('radius', (getattr, self.orbit, 'radius')),
 
             ('surface_gravity', (getattr, self.body, 'surface_gravity')),
             ('equatorial_radius', (getattr, self.body, 'equatorial_radius')),
+            ('body_mass', (getattr, self.body, 'mass')),
         )
+
+        self.G = self.space_center.g
 
         self._stream_locks = {}
         def get_stream_val(self, name, stream_args):
@@ -104,11 +108,13 @@ class Controller(SingletonMixin, object):
         self._parts_in_stage = {
             'all': defaultdict(list),
             'engine': defaultdict(list),
+            'leg': defaultdict(list),
             # 'liquidfuel': defaultdict(list),
         }
         self._parts_in_decouple_stage = {
             'all': defaultdict(list),
             'engine': defaultdict(list),
+            'leg': defaultdict(list),
             # 'liquidfuel': defaultdict(list),
         }
         # self._part_streams = defaultdict(dict)
@@ -130,6 +136,9 @@ class Controller(SingletonMixin, object):
                 self._parts_in_decouple_stage['engine'][decouple_stage].append(part)
                 # self._part_streams[part]['available_thrust'] = self.connection.add_stream(getattr, part.engine, 'available_thrust')
                 # self._part_streams[part]['thrust'] = self.connection.add_stream(getattr, part.engine, 'thrust')
+            elif part.leg:
+                self._parts_in_stage['leg'][stage].append(part)
+                self._parts_in_decouple_stage['leg'][decouple_stage].append(part)
 
         for stage in range(self.current_stage, -2, -1):
             # Remove any engines that activate the same stage they decouple (the small srbs used for seperation)
@@ -182,15 +191,17 @@ class Controller(SingletonMixin, object):
         # print self.connection.krpc.paused
         # self.connection.krpc.paused = True
 
-        if self.vessel.situation == self.space_center.VesselSituation.pre_launch:
-            self._NextStateCls = PreLaunch
-        elif self.vessel.situation == self.space_center.VesselSituation.landed:
-            self._NextStateCls = PreLaunch
-        elif self.vessel.situation == self.space_center.VesselSituation.orbiting:
-            self._NextStateCls = CoastToInterceptBurn
-        else:
-            self._NextStateCls = AscentState
+        # if self.vessel.situation == self.space_center.VesselSituation.pre_launch:
+        #     self._NextStateCls = PreLaunch
+        # elif self.vessel.situation == self.space_center.VesselSituation.landed:
+        #     self._NextStateCls = PreLaunch
+        # elif self.vessel.situation == self.space_center.VesselSituation.orbiting:
+        #     self._NextStateCls = CoastToInterceptBurn
+        # else:
+        #     self._NextStateCls = AscentState
 
+        self._NextStateCls = Descent
+        # self._NextStateCls = SuicideBurn
         # self._NextStateCls = TransitionToHover
         # self._NextStateCls = EnrouteToTarget
 
@@ -207,8 +218,6 @@ class Controller(SingletonMixin, object):
 
             self.state_condition.wait()
             self.state_condition.release()
-
-
 
     @property
     def vessel(self):
@@ -343,6 +352,13 @@ class Controller(SingletonMixin, object):
 
     def set_NextStateCls(self, NextStateCls):
         self._NextStateCls = NextStateCls
+
+    def get_parts_of_type(self, part_type, key=None):
+        parts = list(chain(*self._parts_in_stage[part_type].values()))
+        if key is not None:
+            # parts = [part for part in parts if try_default(key, args=[part], default=False, exceptions=[krpc.error.RPCError])]
+            parts = [part for part in parts if key(part)]
+        return parts
 
     def get_parts_in_stage(self, stage_num, part_type='all', key=None):
         # print 'get_parts_in_decouple_stage: {}'.format(part_type)
@@ -496,10 +512,11 @@ class Controller(SingletonMixin, object):
         [stages.pop(new_stage_num, None) for part_type, stages in self._parts_in_decouple_stage.items()]
 
     def get_local_gravity(self):
-        r = self.equatorial_radius
-        h = self.altitude
-        g = self.surface_gravity
-        return g * (r / (r + h)) ** 2
+        mi = self.mass
+        r = self.radius
+        M = self.body_mass
+        G = self.G
+        return (G * (M+mi) / r**2)
 
     def get_avail_twr(self):
         return self.available_thrust / (self.mass * self.get_local_gravity())

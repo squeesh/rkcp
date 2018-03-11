@@ -228,3 +228,168 @@ def engine_is_active(part):
     # print active
     return active
 
+
+def get_seconds_to_impact(vi, dst, ctrl=None):
+    if not ctrl:
+        from controller import Controller
+        ctrl = Controller.get()
+
+    g = ctrl.surface_gravity
+    v = math.sqrt(vi**2 + 2*g*dst)
+
+    return (v-vi) / g
+
+
+def get_speed_after_time(vi, t, ctrl=None):
+    if not ctrl:
+        from controller import Controller
+        ctrl = Controller.get()
+    g = ctrl.surface_gravity
+    return vi + g * t
+
+
+def get_speed_after_distance(vi, dst, ctrl=None):
+    if not ctrl:
+        from controller import Controller
+        ctrl = Controller.get()
+    g = ctrl.surface_gravity
+    return math.sqrt(vi**2 + 2*g*dst)
+
+
+def find_true_impact_time(vessel, ctrl=None):
+    if not ctrl:
+        from controller import Controller
+        ctrl = Controller.get()
+
+    ReferenceFrame = ctrl.space_center.ReferenceFrame
+
+    ref_frame = ctrl.body.reference_frame
+    flight = vessel.flight(ref_frame)
+
+    base_time = get_seconds_to_impact(math.fabs(flight.speed) * 1.1, flight.surface_altitude, ctrl=ctrl)
+    probe_time = base_time
+
+    resolution_params = (
+        (30.0, 15000),
+        (10.0, 5000),
+        (1.0,  500),
+        (0.1,  50),
+        (0.01, 5),
+    )
+    resolution_param_index = 0
+
+    time_resolution, height_resolution = resolution_params[resolution_param_index]
+
+    prev_probe_time = probe_time
+
+    i = 0
+    while True:
+        probe_pos = vessel.orbit.position_at(ctrl.ut + probe_time, ref_frame)
+        probe_pos_alt = ctrl.body.altitude_at_position(probe_pos, ref_frame)
+
+        body_rot = math.pi * probe_time / ctrl.body.rotational_period
+        futr_ref_frame = ReferenceFrame.create_relative(ref_frame, rotation=(0, math.sin(body_rot), 0, math.cos(body_rot)))
+
+        probe_lat = ctrl.body.latitude_at_position(probe_pos, futr_ref_frame)
+        probe_lng = ctrl.body.longitude_at_position(probe_pos, futr_ref_frame)
+
+        surf_height = ctrl.body.surface_height(probe_lat, probe_lng)
+
+        if probe_pos_alt - surf_height < height_resolution:
+            probe_time = prev_probe_time
+            resolution_param_index += 1
+
+            if resolution_param_index >= len(resolution_params):
+                break
+
+            time_resolution, height_resolution = resolution_params[resolution_param_index]
+
+        prev_probe_time = probe_time
+        probe_time += time_resolution
+        i += 1
+
+    x1, y1, z1 = ctrl.body.surface_position(probe_lat, probe_lng, ref_frame)
+    x2, y2, z2 = vessel.position(ref_frame)
+
+    return probe_time, math.sqrt((x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2), probe_pos, futr_ref_frame
+
+
+def get_suicide_burn_time(vi, dist, use_local_g=False, ctrl=None):
+    if not ctrl:
+        from controller import Controller
+        ctrl = Controller.get()
+
+    mi = ctrl.vessel.mass
+    isp = ctrl.vessel.specific_impulse
+
+    if use_local_g:
+        r = ctrl.vessel.orbit.radius
+        M = ctrl.body.mass
+        G = ctrl.space_center.g
+
+        g = (G * (M+mi) / r**2)
+    else:
+        g = ctrl.body.surface_gravity
+    thrust = ctrl.available_thrust
+
+    bottom = (thrust/(g*isp))
+    e_bit = (vi + math.sqrt(2*g*dist))/(g*isp)
+    top = (mi - (mi/math.exp(e_bit)))
+    return top / bottom
+
+
+def get_suicide_burn_alt(vi, use_local_g=False, ctrl=None):
+    if not ctrl:
+        from controller import Controller
+        ctrl = Controller.get()
+
+    mi = ctrl.mass
+
+    if use_local_g:
+        r = ctrl.radius
+        M = ctrl.body_mass
+        G = ctrl.G
+
+        g = (G * (M+mi) / r**2)
+    else:
+        g = ctrl.surface_gravity
+    thrust = ctrl.available_thrust #* 0.7
+    # print 't:', thrust, 'm:', vessel.mass, 't/m:', thrust/vessel.mass, 'm/t:', vessel.mass/thrust
+
+    accel = thrust / mi - g
+    # t = get_suicide_burn_time(vi, dist, use_local_g=use_local_g)
+
+    # return (vi + (math.sqrt(2 * g * dist) / 2)) * t
+    return (vi ** 2.0) / (2.0 * accel)
+
+
+def to_min_sec_str(sec):
+    minutes = int(sec / 60.0)
+    seconds = int((sec / 60.0 - minutes) * 60.0)
+    mili = int((((sec / 60.0 - minutes) * 60.0) - seconds) * 10)
+
+    return '{}m {}.{}s'.format(minutes, seconds, mili)
+
+
+def rotate_vector(vector, theta, axis):
+    vector = np.asarray(vector)
+    # axis = [axis[0], -axis[1], axis[2]]
+    axis = np.asarray(axis)
+
+    def rotation_matrix(axis, theta):
+        """
+        Return the rotation matrix associated with counterclockwise rotation about
+        the given axis by theta radians.
+        """
+        axis = axis / math.sqrt(np.dot(axis, axis))
+        a = math.cos(theta / 2.0)
+        b, c, d = -axis * math.sin(theta / 2.0)
+        aa, bb, cc, dd = a * a, b * b, c * c, d * d
+        bc, ad, ac, ab, bd, cd = b * c, a * d, a * c, a * b, b * d, c * d
+        return np.array([
+            [aa + bb - cc - dd, 2 * (bc + ad),      2 * (bd - ac)],
+            [2 * (bc - ad),     aa + cc - bb - dd,  2 * (cd + ab)],
+            [2 * (bd + ac),     2 * (cd - ab),      aa + dd - bb - cc],
+        ])
+
+    return np.dot(rotation_matrix(axis, theta), vector)

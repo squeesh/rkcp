@@ -74,10 +74,11 @@ class Manager(object):
 class PitchManager(Manager):
     FIXED_UP = 0
     FIXED_POINT = 1
-    SURFACE_PROGRADE = 2
-    ORBIT_PROGRADE = 3
-    ORBIT_RETROGRADE = 4
-    CUSTOM_PITCH_HEADING = 5
+    ASCENT_SURFACE_PROGRADE = 2
+    SURFACE_RETROGRADE = 3
+    ORBIT_PROGRADE = 4
+    ORBIT_RETROGRADE = 5
+    CUSTOM_PITCH_HEADING = 6
     curr_follow = FIXED_UP
 
     custom_pitch_heading = (90, 90)
@@ -94,7 +95,7 @@ class PitchManager(Manager):
             elif follow == self.FIXED_POINT:
                 vessel.auto_pilot.reference_frame = vessel.surface_reference_frame
                 vessel.auto_pilot.target_pitch_and_heading(self.fixed_point_pitch, 90)
-            elif follow == self.SURFACE_PROGRADE:
+            elif follow == self.ASCENT_SURFACE_PROGRADE:
                 # if vessel.flight().pitch > 30:
                 # vessel.auto_pilot.reference_frame = vessel.surface_velocity_reference_frame
                 # vessel.auto_pilot.target_direction = (0, 1, 0)
@@ -114,6 +115,20 @@ class PitchManager(Manager):
                 #     vessel.auto_pilot.target_pitch_and_heading(flight.pitch + flight.angle_of_attack, 90)
                 # else:
                 #     vessel.auto_pilot.target_pitch_and_heading(flight.pitch - flight.angle_of_attack, 90)
+            elif follow == self.SURFACE_RETROGRADE:
+                velocity_direction = self.ctrl.space_center.transform_direction(
+                    (0, -1, 0), vessel.surface_velocity_reference_frame, vessel.surface_reference_frame)
+
+                pitch, heading = get_pitch_heading(velocity_direction)
+                vessel.auto_pilot.reference_frame = vessel.surface_reference_frame
+                vessel.auto_pilot.target_pitch_and_heading(pitch, heading)
+                # vessel.auto_pilot.target_direction = velocity_direction
+                # vessel.auto_pilot.target_pitch_and_heading(pitch, 90 + heading_error)
+
+
+                # vessel.auto_pilot.reference_frame = vessel.surface_velocity_reference_frame
+                # vessel.auto_pilot.target_direction = (0, -1, 0)
+
             elif follow == self.ORBIT_PROGRADE:
                 # orb_prograde, _ = get_pitch_heading(flight.prograde)
                 # vessel.auto_pilot.target_pitch_and_heading(orb_prograde, 90)
@@ -178,7 +193,8 @@ class ThrottleManager(Manager):
 
     def set_throttle(self, val):
         self._throttle = val
-        self._throttle_queue.append(val)
+        if self.avg_input:
+            self._throttle_queue.append(val)
 
 
 class BurnManager(Manager):
@@ -516,7 +532,12 @@ class BurnManager(Manager):
             'engine',
             key=lambda part: part.engine.active and part.decouple_stage < stage
         )
-        decouple_stage = max([part.decouple_stage for part in (active_engines + self.ctrl.all_parts_after_stage(stage, 'engine'))])
+        decouple_stages = [part.decouple_stage for part in (active_engines + self.ctrl.all_parts_after_stage(stage, 'engine'))]
+        if decouple_stages:
+            decouple_stage = max(decouple_stages)
+        else:
+            decouple_stage = stage
+
         engines = list(set(
             active_engines +
             self.ctrl.all_parts_after_decouple_stage(
@@ -539,8 +560,12 @@ class BurnManager(Manager):
                 'engine',
                 key=lambda part: part.engine.active and part.decouple_stage < current_stage
             )
-            decouple_stage = max(
-                [part.decouple_stage for part in (active_engines + self.ctrl.all_parts_after_stage(current_stage, 'engine'))])
+            decouple_stages = [part.decouple_stage for part in (active_engines + self.ctrl.all_parts_after_stage(current_stage, 'engine'))]
+            if decouple_stages:
+                decouple_stage = max(decouple_stages)
+            else:
+                decouple_stage = stage
+
             engines = list(set(
                 active_engines +
                 self.ctrl.all_parts_after_decouple_stage(

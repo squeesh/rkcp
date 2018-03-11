@@ -474,6 +474,11 @@ def get_speed_after_time(vi, t):
 #     return (vi + vf) / 2 * t
 
 
+def get_speed_after_distance(vi, dst):
+    g = active_body.surface_gravity
+    return math.sqrt(vi**2 + 2*g*dst)
+
+
 def get_time_for_distance(v, d):
     return d/v
 
