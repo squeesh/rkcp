@@ -607,11 +607,14 @@ class Descent(State):
                 # impact_pos = self.ctrl.impact_manager._impact_pos
                 true_imp_true_anomaly = self.ctrl.orbit.true_anomaly_at_ut(true_imp_time)
                 true_imp_radius = self.ctrl.orbit.radius_at(true_imp_time)
-                true_imp_pos = self.ctrl.impact_manager.calc_pos(radius=true_imp_radius, true_anomaly=true_imp_true_anomaly)
-                distb = self.ctrl.impact_manager.itegerate_distant(pos_1=true_imp_pos, orbit_2=self.ctrl.orbit)
+                calc_imp_pos = self.ctrl.impact_manager.calc_pos(radius=true_imp_radius, true_anomaly=true_imp_true_anomaly)
+                calc_vessel_pos = self.ctrl.impact_manager.calc_pos(orbit=self.ctrl.orbit)
+                distb = self.ctrl.impact_manager.itegerate_distant(pos_1=calc_imp_pos, pos_2=calc_vessel_pos)
+                distc = float(calc_vessel_pos.distance(calc_imp_pos))
 
                 print 'dista: ', dista
                 print 'distb: ', distb
+                print 'distc: ', distc
                 print 'diff: ', round(((distb - dista) / distb) * 100.0, 4)
 
                 i = 0

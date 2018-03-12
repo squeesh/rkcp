@@ -724,7 +724,7 @@ class ImpactManager(Manager):
         while True:
             sleep(1.0)
 
-            if all([self.ellipse, self.circle, self._impact_pos, self._impact_true_anomaly]):
+            if all([self.ellipse, self.circle]):
 
                 POINT_SIZE = self.circle.hradius*0.05
                 STROKE_WIDTH = self.circle.hradius * 0.025
@@ -734,20 +734,22 @@ class ImpactManager(Manager):
 
                 lines.append('<html><head><meta http-equiv="Refresh" content="2"></head><body>')
                 x1 = int(-self.circle.hradius * 1.25)
-                y1 = int(-self.ellipse.vradius * 1.25)
-                x2 = int(self.ellipse.hradius * 1.15 * 2)
-                y2 = int(self.ellipse.vradius * 1.25) + math.fabs(y1)
-                lines.append('<svg viewBox="{} {} {} {}" style="width: 50%">'.format(x1, y1, x2, y2))
+                y1 = min(int(-self.ellipse.vradius * 1.25), int(-self.circle.vradius * 1.25))
+                x2 = int(self.ellipse.hradius * 1.25 * 2)
+                y2 = max(int(self.ellipse.vradius * 1.25), int(self.circle.vradius * 1.25)) + math.fabs(y1)
+                lines.append('<svg viewBox="{} {} {} {}" style="width: 80%">'.format(x1, y1, x2, y2))
                 lines.append(svg(self.ellipse, stroke_width=STROKE_WIDTH))
                 lines.append(svg(self.circle, stroke_width=STROKE_WIDTH))
                 lines.append(svg(sympy.Circle(self.focii, POINT_SIZE), color='#0000FF', fill_color='#0000FF'))
                 lines.append(svg(sympy.Circle(self.ellipse.center, POINT_SIZE), color='#BBBB00', fill_color='#BBBB00'))
-                lines.append(svg(sympy.Circle(self._impact_pos, POINT_SIZE), color='#FF0000', fill_color='#FF0000'))
+                if self._impact_pos is not None:
+                    lines.append(svg(sympy.Circle(self._impact_pos, POINT_SIZE), color='#FF0000', fill_color='#FF0000'))
 
-                lines.append('<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}" transform="rotate({})" />'.format(
-                    0, 0, self.circle.hradius, 0, '#FF0000', STROKE_WIDTH,
-                    math.degrees(correct_angle(self._impact_true_anomaly)),
-                ))
+                if self._impact_true_anomaly is not None:
+                    lines.append('<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}" transform="rotate({})" />'.format(
+                        0, 0, self.circle.hradius, 0, '#FF0000', STROKE_WIDTH,
+                        math.degrees(correct_angle(self._impact_true_anomaly)),
+                    ))
 
                 vessel_pos = self.ctrl.impact_manager.calc_pos(orbit=self.ctrl.orbit)
                 lines.append(svg(sympy.Circle(vessel_pos, POINT_SIZE), color='#00FF00', fill_color='#00FF00'))
@@ -827,14 +829,25 @@ class ImpactManager(Manager):
             integral_func = self.integral_func.subs(integral_kwargs)
             return math.fabs(integral_func.as_sum(n, 'trapezoid'))
 
-        integral_dist = get_integral_dist(theta_1, theta_2)
-        print 'base_dist: ', integral_dist
+        base_integral_dist = getattr(self, '_base_integral_dist', None)
+
+        if base_integral_dist and (
+            round(self.ctrl.semi_major_axis, 2) != round(self._semi_major_axis, 2) or
+            round(self.ctrl.semi_minor_axis, 2) != round(self._semi_minor_axis, 2)
+        ):
+            base_integral_dist = None
+
+        if theta_extra is None or base_integral_dist is None:
+            base_integral_dist = get_integral_dist(theta_1, theta_2)
+            print 'base_dist: ', base_integral_dist
+
+        extra_dist = 0
         if theta_extra is not None:
             extra_dist = get_integral_dist(theta_extra, half_pi)
             print 'extr_dist: ', extra_dist
-            integral_dist += extra_dist
 
-        self._integral_dist = integral_dist
+        self._base_integral_dist = base_integral_dist
+        self._integral_dist = base_integral_dist + extra_dist
         return self._integral_dist
 
     def time_to_impact(self):
@@ -986,11 +999,14 @@ class ImpactManager(Manager):
                 if theta >= self.true_anomaly:
                     theta_list.append((theta, impact_pos))
 
-            impact_true_anomaly, self._impact_pos = sorted(theta_list)[0]
-            self._impact_true_anomaly = impact_true_anomaly
-            impact_time = self.ctrl.orbit.ut_at_true_anomaly(impact_true_anomaly)
-            impact_pos = self.ctrl.orbit.position_at(impact_time, self.ctrl.body.non_rotating_reference_frame)
-            self._impact_time_pos = (impact_time, impact_pos)
+            if theta_list:
+                impact_true_anomaly, self._impact_pos = sorted(theta_list)[0]
+                self._impact_true_anomaly = impact_true_anomaly
+                impact_time = self.ctrl.orbit.ut_at_true_anomaly(impact_true_anomaly)
+                impact_pos = self.ctrl.orbit.position_at(impact_time, self.ctrl.body.non_rotating_reference_frame)
+                self._impact_time_pos = (impact_time, impact_pos)
+            else:
+                self._impact_time_pos = (-1, None)
 
         return self._impact_time_pos
 
