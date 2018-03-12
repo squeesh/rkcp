@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 import math
 from time import sleep
 from functools import partial
+# from sympy import Ellipse, Circle, Point
+import sympy
 
 from util import get_pitch_heading, unit_vector, engine_is_active
 
@@ -676,4 +678,333 @@ class StagingManager(object):
                             sleep(0.1)
                             self.post_stage.notify_all()
                             self.post_stage.release()
+
+
+class ImpactManager(Manager):
+    _semi_major_axis = 0.0
+    _semi_minor_axis = 0.0
+
+    def __init__(self):
+        super(ImpactManager, self).__init__()
+
+        I, D, sin, cos, sqrt = sympy.Integral, sympy.Derivative, sympy.sin, sympy.cos, sympy.sqrt
+        self.integral_symbols = sympy.symbols('a b t tmin tmax')
+        a, b, t, tmin, tmax = self.integral_symbols
+        self.integral_func = I(sqrt(D(a * cos(t), t, evaluate=True) ** 2 + D(b * sin(t), t, evaluate=True) ** 2), (t, tmin, tmax))
+
+    def run(self):
+
+        from sympy.plotting.plot import Plot
+        while True:
+            sleep(1.0)
+            print self.ellipse, self.circle
+
+            def svg(e, scale_factor=1., fill_color="transparent"):
+                """Returns SVG ellipse element for the Ellipse.
+
+                Parameters
+                ==========
+
+                scale_factor : float
+                    Multiplication factor for the SVG stroke-width.  Default is 1.
+                fill_color : str, optional
+                    Hex string for fill color. Default is "#66cc99".
+                """
+
+                from sympy.core.evalf import N
+
+                c = N(e.center)
+                h, v = N(e.hradius), N(e.vradius)
+                return (
+                    '<ellipse fill="{1}" stroke="#000000" '
+                    'stroke-width="{0}" opacity="0.6" cx="{2}" cy="{3}" rx="{4}" ry="{5}"/>'
+                ).format(scale_factor, fill_color, c.x, c.y, h, v)
+
+            if self.ellipse and self.circle:
+
+                f = open('orbit_svg.htm', 'w+')
+
+                from sympy.plotting import plot_implicit
+                import sympy
+                f.write('<html><body>')
+                x1 = int(-self.circle.hradius * 1.25)
+                y1 = int(-self.ellipse.vradius * 1.25)
+                x2 = int(self.ellipse.hradius * 1.15 * 2)
+                y2 = int(self.ellipse.vradius * 1.25) + math.fabs(y1)
+                f.write('<svg viewBox="{} {} {} {}" style="width: 50%">'.format(x1, y1, x2, y2))
+                f.write(svg(self.ellipse, scale_factor=self.circle.hradius * 0.05))
+                f.write(svg(self.circle, scale_factor=self.circle.hradius * 0.05))
+                f.write('</svg>')
+                f.write('</body></html>')
+                # p1 = plot_implicit(self.ellipse.equation(), show=False)
+                # p2 = plot_implicit(self.circle.equation(), show=False)
+                # p1.append(p2[0])
+                #
+                # # p1._backend = p1.backend(p1)
+                # # fg, ax = p1._backend.fig, p1._backend.ax  # get matplotib's figure and ax
+                # #
+                # # # Use matplotlib to change appearance:
+                # # ax.axis('tight')
+                # # ax.set_aspect("equal")  # 'auto', 'equal' or a positive integer is allowed
+                # # ax.grid(True)
+                #
+                # p1.show()
+
+                break
+        # self.ellipse = sympy.Ellipse(sympy.Point(self.c, 0), self.a, self.b)
+        # self.circle = sympy.Circle(self.focii, self.r)
+
+
+    def itegerate_distant(self,
+        pos_1=None, orbit_1=None, theta_1=None,
+        pos_2=None, orbit_2=None, theta_2=None,
+        n=50,
+    ):
+        assert (pos_1 or orbit_1 or theta_1) and (pos_2 or orbit_2 or theta_2)
+
+        # ASSUMPTION: theta_1 is ALWAYS < 90deg
+        if theta_1 is None:
+            kwargs_1 = {'pos': pos_1} if pos_1 is not None else {'orbit': orbit_1}
+            theta_1 = self.calc_center_theta(**kwargs_1)
+
+        if theta_2 is None:
+            kwargs_2 = {'pos': pos_2} if pos_2 is not None else {'orbit': orbit_2}
+            theta_2 = self.calc_center_theta(**kwargs_2)
+
+        if theta_1 < 0 or theta_1 > theta_2 or theta_2 > math.pi:
+            return -1.0
+
+        print 'imp thet: ', math.degrees(theta_1), '|', theta_1
+        print 'ves thet: ', math.degrees(theta_2), '|', theta_2
+
+        half_pi = math.pi/2.0
+        theta_extra = None
+        if theta_2 > half_pi:
+            theta_extra = half_pi - (theta_2 - half_pi)
+            theta_2 = half_pi
+            # dist_offset += self.quater_arc_length
+
+        print 'theta_2: ', math.degrees(theta_2), '|', theta_2
+        print 'theta_e: ', math.degrees(theta_extra or 0), '|', theta_extra
+
+        def get_integral_dist(theta_a, theta_b):
+            a, b, t, tmin, tmax = self.integral_symbols
+
+            integral_kwargs = {
+                a: self._semi_major_axis,
+                b: self._semi_minor_axis,
+                tmin: math.atan(self._semi_major_axis * math.tan(theta_a) / self._semi_minor_axis),
+                tmax: math.atan(self._semi_major_axis * math.tan(theta_b) / self._semi_minor_axis),
+            }
+
+            integral_func = self.integral_func.subs(integral_kwargs)
+            return math.fabs(integral_func.as_sum(n, 'trapezoid'))
+
+        integral_dist = get_integral_dist(theta_1, theta_2)
+        print 'base_dist: ', integral_dist
+        if theta_extra is not None:
+            extra_dist = get_integral_dist(theta_extra, half_pi)
+            print 'extr_dist: ', extra_dist
+            integral_dist += extra_dist
+
+        self._integral_dist = integral_dist
+        return self._integral_dist
+
+    def time_to_impact(self):
+        time_dist_pos = getattr(self, '_time_dist_pos', None)
+
+        if time_dist_pos and (
+            round(self.ctrl.semi_major_axis, 2) != round(self._semi_major_axis, 2) or
+            round(self.ctrl.semi_minor_axis, 2) != round(self._semi_minor_axis, 2)
+        ):
+            """Invalid ellipse on change of semi major / minor axis"""
+            time_dist_pos = None
+            print 'invalid time_dist_pos'
+
+        if time_dist_pos is None:
+
+            ReferenceFrame = self.ctrl.ReferenceFrame
+            base_ut = self.ctrl.ut
+
+            ref_frame = self.ctrl.body.reference_frame
+            period = self.ctrl.rotational_period
+
+            RESOLUTION_PARAMS = (
+                1.0,
+                0.5,
+                0.25,
+                0.125,
+                0.0625,
+            )
+            resolution_param_index = 0
+
+            time_resolution = RESOLUTION_PARAMS[resolution_param_index]
+
+            base_time, base_pos = self.sphere_intersection_time_pos(cache=False)
+            base_time += .1
+            probe_time = base_time - base_ut
+            prev_probe_time = probe_time
+
+            i = 0
+            while True:
+                body_rot = math.pi * probe_time / period
+                futr_ref_frame = ReferenceFrame.create_relative(ref_frame, rotation=(0, math.sin(body_rot), 0, math.cos(body_rot)))
+
+                probe_pos = self.ctrl.vessel.orbit.position_at(base_ut + probe_time, ref_frame)
+                probe_pos_alt = self.ctrl.body.altitude_at_position(probe_pos, ref_frame)
+
+                probe_lat = self.ctrl.body.latitude_at_position(probe_pos, futr_ref_frame)
+                probe_lng = self.ctrl.body.longitude_at_position(probe_pos, futr_ref_frame)
+
+                surf_height = self.ctrl.body.surface_height(probe_lat, probe_lng)
+
+                if surf_height - probe_pos_alt < 0:
+                    probe_time = prev_probe_time
+                    resolution_param_index += 1
+
+                    if resolution_param_index >= len(RESOLUTION_PARAMS):
+                        break
+
+                    time_resolution = RESOLUTION_PARAMS[resolution_param_index]
+
+                prev_probe_time = probe_time
+                probe_time -= time_resolution
+                i += 1
+
+            # x1, y1, z1 = probe_pos
+            # x2, y2, z2 = self.ctrl.vessel.position(ref_frame)
+            self._time_dist_pos = (base_ut + probe_time, probe_pos)
+
+            # vessel_theta = self.calc_center_theta(orbit=self.ctrl.orbit)
+            # impact_theta = self.calc_center_theta(pos=self._impact_pos)
+            #
+            # print 'ves thet: ', math.degrees(vessel_theta), '|', vessel_theta
+            # print 'imp thet: ', math.degrees(impact_theta), '|', impact_theta
+            #
+            # n = 50
+            #
+            # a, b, t, tmin, tmax = self.integral_symbols
+            #
+            # integral_kwargs = {
+            #     a: self._semi_major_axis,
+            #     b: self._semi_minor_axis,
+            #     tmin: math.atan(self._semi_major_axis * math.tan(vessel_theta) / self._semi_minor_axis),
+            #     tmax: math.atan(self._semi_major_axis * math.tan(impact_theta) / self._semi_minor_axis),
+            # }
+            #
+            # integral_func = self.integral_func.subs(integral_kwargs)
+            # self._integral_dist = math.fabs(integral_func.as_sum(n, 'trapezoid'))
+
+
+        return self._time_dist_pos
+
+    def calc_true_anomaly(self, x):
+        x_to_p = float(x.distance(self.periapsis))
+        x_to_f = float(x.distance(self.focii))
+        p_to_f = self.a - self.c
+        output = math.acos((x_to_f ** 2 + p_to_f ** 2 - x_to_p ** 2) / (2.0 * x_to_f * p_to_f))
+        if x.y < 0:
+            output = -output
+        return output
+
+    def calc_pos(self, orbit=None, radius=None, true_anomaly=None):
+        assert orbit or (radius and true_anomaly)
+        if orbit is not None:
+            radius = orbit.radius
+            true_anomaly = orbit.true_anomaly
+
+        x_to_f = radius
+        theta = math.pi - math.fabs(true_anomaly)
+        return sympy.Point(
+            x_to_f * math.cos(theta),
+            x_to_f * math.sin(theta),
+        )
+
+    def calc_center_theta(self, pos=None, orbit=None, radius=None, true_anomaly=None):
+        # x = our object
+        assert pos or orbit or (radius and true_anomaly)
+        if not pos:
+            pos = self.calc_pos(orbit=orbit, radius=radius, true_anomaly=true_anomaly)
+
+        x_to_f = float(pos.distance(self.focii))
+        x_to_center = float(pos.distance(self.ellipse.center))
+        # output = math.acos((x_to_f ** 2 + p_to_f ** 2 - x_to_p ** 2) / (2.0 * x_to_f * p_to_f))
+        return math.acos((x_to_center ** 2 + self.c ** 2 - x_to_f ** 2) / (2.0 * x_to_center * self.c))
+
+    def sphere_intersection_time_pos(self, cache=True):
+        impact_time_pos = getattr(self, '_impact_time_pos', None)
+
+        if impact_time_pos and (
+            round(self.ctrl.semi_major_axis, 2) != round(self._semi_major_axis, 2) or
+            round(self.ctrl.semi_minor_axis, 2) != round(self._semi_minor_axis, 2)
+        ):
+            """Invalid ellipse on change of semi major / minor axis"""
+            impact_time_pos = None
+            print 'invalid intersection_time_pos'
+
+        if impact_time_pos is None or not cache:
+            print 'create intersection_time_pos!'
+            inter_points = self.sphere_intersection_points(cache=False)
+            theta_list = []
+
+            for intersection in inter_points:
+                # I think the math.pi part is incorrect, perhaps this doesn't handel oblique triangles
+                impact_pos = sympy.Point(*intersection)
+                theta = math.pi - self.calc_true_anomaly(impact_pos) - 2 * math.pi
+                if theta >= self.true_anomaly:
+                    theta_list.append((theta, impact_pos))
+
+            impact_true_anomaly, self._impact_pos = sorted(theta_list)[0]
+            self._impact_true_anomaly = impact_true_anomaly
+            impact_time = self.ctrl.orbit.ut_at_true_anomaly(impact_true_anomaly)
+            impact_pos = self.ctrl.orbit.position_at(impact_time, self.ctrl.body.non_rotating_reference_frame)
+            self._impact_time_pos = (impact_time, impact_pos)
+
+        return self._impact_time_pos
+
+    def sphere_intersection_points(self, cache=True):
+        intersection_points = getattr(self, '_intersection_points', None)
+
+        if intersection_points and (
+            round(self.ctrl.semi_major_axis, 2) != round(self._semi_major_axis, 2) or
+            round(self.ctrl.semi_minor_axis, 2) != round(self._semi_minor_axis, 2)
+        ):
+            # TODO should include semi minor too
+            """Invalid ellipse on change of semi major / minor axis"""
+            intersection_points = None
+            print 'invalid intersection points'
+
+        if intersection_points is None or not cache:
+            print 'create intersection points!'
+            self.init_vars()
+            self._intersection_points = \
+                sorted(list(set([(float(point.x), float(point.y)) for point in self.ellipse.intersection(self.circle)])))
+        return self._intersection_points
+
+    def init_vars(self):
+        self._semi_major_axis = self.ctrl.semi_major_axis
+        self._semi_minor_axis = self.ctrl.semi_minor_axis
+
+        self.r = self.ctrl.equatorial_radius
+        self.a = self._semi_major_axis
+        self.b = self._semi_minor_axis
+        self.c = math.sqrt(self.a**2 - self.b**2)  # linear eccentricity
+
+        self.periapsis = sympy.Point(self.a - self.c, 0)
+        self.true_anomaly = self.ctrl.true_anomaly
+        self.focii = sympy.Point(0, 0)
+        self.ellipse = sympy.Ellipse(sympy.Point(self.c, 0), self.a, self.b)
+        self.circle = sympy.Circle(self.focii, self.r)
+
+        a, b, t, tmin, tmax = self.integral_symbols
+
+        integral_kwargs = {
+            a: self._semi_major_axis,
+            b: self._semi_minor_axis,
+            tmin: math.atan(self._semi_major_axis * math.tan(0.0) / self._semi_minor_axis),
+            tmax: math.atan(self._semi_major_axis * math.tan(math.pi/2.0) / self._semi_minor_axis),
+        }
+
+        integral_func = self.integral_func.subs(integral_kwargs)
+        self.quater_arc_length = math.fabs(integral_func.as_sum(50, 'trapezoid'))
 

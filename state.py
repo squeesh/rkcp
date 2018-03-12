@@ -581,65 +581,83 @@ class Descent(State):
         while True:
             i += 1
             curr_second = datetime.now().second
+
+            # impact_time, impact_pos = get_sphere_impact_time_pos(self.ctrl)
+            impact_time = 59223.4067737
+            true_imp_time, true_imp_pos = self.ctrl.impact_manager.time_to_impact()
+
+            # ves_pos = self.ctrl.vessel.position(self.ctrl.body.non_rotating_reference_frame)
+            # imp_line = self.ctrl.connection.drawing.add_line(impact_pos, ves_pos, self.ctrl.body.non_rotating_reference_frame)
+            # imp_line.color = (1, 1, 1)
+
             if curr_second != last_second:
                 print
                 print 'tks: ', i
                 print 'ta: ', math.degrees(self.ctrl.orbit.true_anomaly)
+                ctrl_ut = self.ctrl.ut
+                print 'time to imp: ', to_min_sec_str(impact_time - ctrl_ut)
+                print 'true to imp: ', to_min_sec_str(true_imp_time - ctrl_ut)
+                print 'imp pos: ', self.ctrl.impact_manager._impact_pos
+                print 'quart arc: ', self.ctrl.impact_manager.quater_arc_length
 
-                # impact_time, impact_pos = get_sphere_impact_time_pos(self.ctrl)
-                impact_time = 59223.4067737
-                true_imp_time, dist, _, _ = find_true_impact_time(self.ctrl.vessel, self.ctrl)
+                x1, y1, z1 = true_imp_pos
+                x2, y2, z2 = self.ctrl.vessel.position(self.ctrl.body.reference_frame)
+                dista = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2 + (z2 - z1) ** 2)
 
+                # impact_pos = self.ctrl.impact_manager._impact_pos
+                true_imp_true_anomaly = self.ctrl.orbit.true_anomaly_at_ut(true_imp_time)
+                true_imp_radius = self.ctrl.orbit.radius_at(true_imp_time)
+                true_imp_pos = self.ctrl.impact_manager.calc_pos(radius=true_imp_radius, true_anomaly=true_imp_true_anomaly)
+                distb = self.ctrl.impact_manager.itegerate_distant(pos_1=true_imp_pos, orbit_2=self.ctrl.orbit)
 
-
-                # ves_pos = self.ctrl.vessel.position(self.ctrl.body.non_rotating_reference_frame)
-                # imp_line = self.ctrl.connection.drawing.add_line(impact_pos, ves_pos, self.ctrl.body.non_rotating_reference_frame)
-                # imp_line.color = (1, 1, 1)
-
-                print 'time to imp: ', to_min_sec_str(impact_time - self.ctrl.ut)
-                print 'true to imp: ', to_min_sec_str(true_imp_time)
-                # print 'alt at: ', round(self.ctrl.body.altitude_at_position(impact_pos, self.ctrl.body.reference_frame), 3)
-                #
-                # lat = self.ctrl.body.latitude_at_position(impact_pos, self.ctrl.body.reference_frame)
-                # lng = self.ctrl.body.longitude_at_position(impact_pos, self.ctrl.body.reference_frame)
-                # height = self.ctrl.body.surface_height(lat, lng)
-                # print 'hgt at: ', height
-
-                # old_lines = lines
-                # lines = []
-                #
-                # rel_ref_frame = ReferenceFrame.create_hybrid(
-                #     position=self.ctrl.vessel.surface_reference_frame,
-                #     rotation=self.ctrl.body.reference_frame,
-                # )
-                #
-                # for i, offset in enumerate((
-                #     (1, 0, 0),  # x: red
-                #     (0, 1, 0),  # y: green
-                #     (0, 0, 1),  # z: blue
-                # )):
-                #     pos_offset = [offset[j] * 10.0 for j in range(3)]
-                #
-                #     lines.append(self.ctrl.connection.drawing.add_line((0, 0, 0), pos_offset, rel_ref_frame))
-                #     lines[-1].color = offset
-                #
-                # vec_rpd = self.ctrl.orbit.reference_plane_direction(rel_ref_frame)
-                # rpd = [v*10 for v in vec_rpd]
-                # lines.append(self.ctrl.connection.drawing.add_line((0, 0, 0), rpd, rel_ref_frame))
-                # lines[-1].color = (1, 1, 0)
-                #
-                # theta = self.ctrl.orbit.longitude_of_ascending_node
-                # rotation_axis = self.ctrl.orbit.reference_plane_normal(rel_ref_frame)
-                # vec_rpd_rot = rotate_vector(vec_rpd, theta, rotation_axis)
-                # rpd_rot = [v*10 for v in vec_rpd_rot]
-                # lines.append(self.ctrl.connection.drawing.add_line((0, 0, 0), rpd_rot, rel_ref_frame))
-                # lines[-1].color = (0, 1, 1)
-                #
-                # for line in old_lines:
-                #     line.remove()
+                print 'dista: ', dista
+                print 'distb: ', distb
+                print 'diff: ', round(((distb - dista) / distb) * 100.0, 4)
 
                 i = 0
                 last_second = curr_second
+
+            # print 'alt at: ', round(self.ctrl.body.altitude_at_position(impact_pos, self.ctrl.body.reference_frame), 3)
+            #
+            # lat = self.ctrl.body.latitude_at_position(impact_pos, self.ctrl.body.reference_frame)
+            # lng = self.ctrl.body.longitude_at_position(impact_pos, self.ctrl.body.reference_frame)
+            # height = self.ctrl.body.surface_height(lat, lng)
+            # print 'hgt at: ', height
+
+            # old_lines = lines
+            # lines = []
+            #
+            # rel_ref_frame = ReferenceFrame.create_hybrid(
+            #     position=self.ctrl.vessel.surface_reference_frame,
+            #     rotation=self.ctrl.body.reference_frame,
+            # )
+            #
+            # for i, offset in enumerate((
+            #     (1, 0, 0),  # x: red
+            #     (0, 1, 0),  # y: green
+            #     (0, 0, 1),  # z: blue
+            # )):
+            #     pos_offset = [offset[j] * 10.0 for j in range(3)]
+            #
+            #     lines.append(self.ctrl.connection.drawing.add_line((0, 0, 0), pos_offset, rel_ref_frame))
+            #     lines[-1].color = offset
+            #
+            # vec_rpd = self.ctrl.orbit.reference_plane_direction(rel_ref_frame)
+            # rpd = [v*10 for v in vec_rpd]
+            # lines.append(self.ctrl.connection.drawing.add_line((0, 0, 0), rpd, rel_ref_frame))
+            # lines[-1].color = (1, 1, 0)
+            #
+            # theta = self.ctrl.orbit.longitude_of_ascending_node
+            # rotation_axis = self.ctrl.orbit.reference_plane_normal(rel_ref_frame)
+            # vec_rpd_rot = rotate_vector(vec_rpd, theta, rotation_axis)
+            # rpd_rot = [v*10 for v in vec_rpd_rot]
+            # lines.append(self.ctrl.connection.drawing.add_line((0, 0, 0), rpd_rot, rel_ref_frame))
+            # lines[-1].color = (0, 1, 1)
+            #
+            # for line in old_lines:
+            #     line.remove()
+
+
 
         self.ctrl.pitch_follow = PitchManager.SURFACE_RETROGRADE
         self.ctrl.vessel.auto_pilot.engage()

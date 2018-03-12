@@ -12,7 +12,7 @@ from sympy import Ellipse, Circle, Point
 from util import SingletonMixin, get_current_stage, get_current_decouple_stage, get_vessel_pitch_heading, engine_is_active, get_pitch_heading
 from state import PreLaunch, AscentState, CoastToApoapsis, InOrbit, CoastToInterceptBurn, SurfaceHover, TransitionToHover, \
     EnrouteToTarget, Descent, SuicideBurn
-from manager import StagingManager, PitchManager, ThrottleManager, BurnManager, EventManager
+from manager import StagingManager, PitchManager, ThrottleManager, BurnManager, EventManager, ImpactManager
 
 
 class Controller(SingletonMixin, object):
@@ -75,6 +75,7 @@ class Controller(SingletonMixin, object):
         )
 
         self.G = self.space_center.g
+        self.ReferenceFrame = self.space_center.ReferenceFrame
 
         self._stream_locks = {}
         def get_stream_val(self, name, stream_args):
@@ -168,6 +169,7 @@ class Controller(SingletonMixin, object):
         self.pitch_manager = PitchManager()
         self.throttle_manager = ThrottleManager()
         self.burn_manager = BurnManager()
+        self.impact_manager = ImpactManager()
 
         self.state_condition = Condition()
 
