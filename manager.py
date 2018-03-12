@@ -726,44 +726,55 @@ class ImpactManager(Manager):
 
             if all([self.ellipse, self.circle, self._impact_pos, self._impact_true_anomaly]):
 
-                f = open('orbit_svg.htm', 'w+')
-
                 POINT_SIZE = self.circle.hradius*0.05
                 STROKE_WIDTH = self.circle.hradius * 0.025
+                TEXT_SCALE = 1000.0
 
-                f.write('<html><body>')
+                lines = []
+
+                lines.append('<html><head><meta http-equiv="Refresh" content="2"></head><body>')
                 x1 = int(-self.circle.hradius * 1.25)
                 y1 = int(-self.ellipse.vradius * 1.25)
                 x2 = int(self.ellipse.hradius * 1.15 * 2)
                 y2 = int(self.ellipse.vradius * 1.25) + math.fabs(y1)
-                f.write('<svg viewBox="{} {} {} {}" style="width: 50%">'.format(x1, y1, x2, y2))
-                f.write(svg(self.ellipse, stroke_width=STROKE_WIDTH))
-                f.write(svg(self.circle, stroke_width=STROKE_WIDTH))
-                f.write(svg(sympy.Circle(self.focii, POINT_SIZE), color='#0000FF', fill_color='#0000FF'))
-                f.write(svg(sympy.Circle(self.ellipse.center, POINT_SIZE), color='#BBBB00', fill_color='#BBBB00'))
-                f.write(svg(sympy.Circle(self._impact_pos, POINT_SIZE), color='#FF0000', fill_color='#FF0000'))
+                lines.append('<svg viewBox="{} {} {} {}" style="width: 50%">'.format(x1, y1, x2, y2))
+                lines.append(svg(self.ellipse, stroke_width=STROKE_WIDTH))
+                lines.append(svg(self.circle, stroke_width=STROKE_WIDTH))
+                lines.append(svg(sympy.Circle(self.focii, POINT_SIZE), color='#0000FF', fill_color='#0000FF'))
+                lines.append(svg(sympy.Circle(self.ellipse.center, POINT_SIZE), color='#BBBB00', fill_color='#BBBB00'))
+                lines.append(svg(sympy.Circle(self._impact_pos, POINT_SIZE), color='#FF0000', fill_color='#FF0000'))
 
-                f.write('<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}" transform="rotate({})" />'.format(
+                lines.append('<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}" transform="rotate({})" />'.format(
                     0, 0, self.circle.hradius, 0, '#FF0000', STROKE_WIDTH,
                     math.degrees(correct_angle(self._impact_true_anomaly)),
                 ))
 
                 vessel_pos = self.ctrl.impact_manager.calc_pos(orbit=self.ctrl.orbit)
-                f.write(svg(sympy.Circle(vessel_pos, POINT_SIZE), color='#00FF00', fill_color='#00FF00'))
-                f.write('<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}" transform="rotate({})" />'.format(
+                lines.append(svg(sympy.Circle(vessel_pos, POINT_SIZE), color='#00FF00', fill_color='#00FF00'))
+                lines.append('<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}" transform="rotate({})" />'.format(
                     0, 0, vessel_pos.radius, 0, '#00FF00', STROKE_WIDTH,
                     math.degrees(correct_angle(vessel_pos.true_anomaly)),
                 ))
+                lines.append('<text x="{}" y="{}" fill="{}" font-size="{}" transform="scale({})">{}</text>'.format(
+                    -50000 / TEXT_SCALE, 50000 / TEXT_SCALE, '#00FF00', 50,
+                    TEXT_SCALE, round(math.degrees(vessel_pos.true_anomaly), 3),
+                ))
 
                 vessel_center_theta = self.ctrl.impact_manager.calc_center_theta(pos=vessel_pos)
-                f.write(svg(sympy.Circle(vessel_pos, POINT_SIZE), color='#00FF00', fill_color='#00FF00'))
-                f.write('<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}" transform="rotate({} {} {})" />'.format(
+                lines.append('<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}" transform="rotate({} {} {})" />'.format(
                     float(self.ellipse.center.x), 0, float(self.ellipse.center.x) + self.ellipse.hradius, 0, '#00FFFF', STROKE_WIDTH,
                     math.degrees(correct_angle(vessel_center_theta)), float(self.ellipse.center.x), 0,
                 ))
+                lines.append('<text x="{}" y="{}" fill="{}" font-size="{}" transform="scale({})">{}</text>'.format(
+                    (float(self.ellipse.center.x) - 50000) / TEXT_SCALE, 50000 / TEXT_SCALE, '#00FFFF', 50,
+                    TEXT_SCALE, round(math.degrees(vessel_center_theta), 3),
+                ))
 
-                f.write('</svg>')
-                f.write('</body></html>')
+                lines.append('</svg>')
+                lines.append('</body></html>')
+
+                f = open('orbit_svg.htm', 'w+')
+                f.write(''.join(lines))
                 f.close()
                 print 'file created'
                 sleep(5.0)
@@ -783,6 +794,9 @@ class ImpactManager(Manager):
         if theta_2 is None:
             kwargs_2 = {'pos': pos_2} if pos_2 is not None else {'orbit': orbit_2}
             theta_2 = self.calc_center_theta(**kwargs_2)
+
+        theta_1 = -theta_1
+        theta_2 = -theta_2
 
         if theta_1 < 0 or theta_1 > theta_2 or theta_2 > math.pi:
             return -1.0
