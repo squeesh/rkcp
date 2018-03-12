@@ -684,6 +684,9 @@ class ImpactManager(Manager):
     _semi_major_axis = 0.0
     _semi_minor_axis = 0.0
 
+    _impact_pos = None
+    _impact_true_anomaly = None
+
     def __init__(self):
         super(ImpactManager, self).__init__()
 
@@ -694,66 +697,76 @@ class ImpactManager(Manager):
 
     def run(self):
 
-        from sympy.plotting.plot import Plot
+        def svg(e, stroke_width=1., color="#000", fill_color="transparent"):
+            """Returns SVG ellipse element for the Ellipse.
+
+            Parameters
+            ==========
+
+            scale_factor : float
+                Multiplication factor for the SVG stroke-width.  Default is 1.
+            fill_color : str, optional
+                Hex string for fill color. Default is "#66cc99".
+            """
+
+            from sympy.core.evalf import N
+
+            c = N(e.center)
+            h, v = N(e.hradius), N(e.vradius)
+            return (
+                '<ellipse stroke="{}" fill="{}" stroke-width="{}"'
+                ' opacity="1.0" cx="{}" cy="{}" rx="{}" ry="{}"/>'
+            ).format(color, fill_color, stroke_width, c.x, c.y, h, v)
+
+        def correct_angle(theta):
+            return math.pi - theta
+
         while True:
             sleep(1.0)
-            print self.ellipse, self.circle
 
-            def svg(e, scale_factor=1., fill_color="transparent"):
-                """Returns SVG ellipse element for the Ellipse.
-
-                Parameters
-                ==========
-
-                scale_factor : float
-                    Multiplication factor for the SVG stroke-width.  Default is 1.
-                fill_color : str, optional
-                    Hex string for fill color. Default is "#66cc99".
-                """
-
-                from sympy.core.evalf import N
-
-                c = N(e.center)
-                h, v = N(e.hradius), N(e.vradius)
-                return (
-                    '<ellipse fill="{1}" stroke="#000000" '
-                    'stroke-width="{0}" opacity="0.6" cx="{2}" cy="{3}" rx="{4}" ry="{5}"/>'
-                ).format(scale_factor, fill_color, c.x, c.y, h, v)
-
-            if self.ellipse and self.circle:
+            if all([self.ellipse, self.circle, self._impact_pos, self._impact_true_anomaly]):
 
                 f = open('orbit_svg.htm', 'w+')
 
-                from sympy.plotting import plot_implicit
-                import sympy
+                POINT_SIZE = self.circle.hradius*0.05
+                STROKE_WIDTH = self.circle.hradius * 0.025
+
                 f.write('<html><body>')
                 x1 = int(-self.circle.hradius * 1.25)
                 y1 = int(-self.ellipse.vradius * 1.25)
                 x2 = int(self.ellipse.hradius * 1.15 * 2)
                 y2 = int(self.ellipse.vradius * 1.25) + math.fabs(y1)
                 f.write('<svg viewBox="{} {} {} {}" style="width: 50%">'.format(x1, y1, x2, y2))
-                f.write(svg(self.ellipse, scale_factor=self.circle.hradius * 0.05))
-                f.write(svg(self.circle, scale_factor=self.circle.hradius * 0.05))
+                f.write(svg(self.ellipse, stroke_width=STROKE_WIDTH))
+                f.write(svg(self.circle, stroke_width=STROKE_WIDTH))
+                f.write(svg(sympy.Circle(self.focii, POINT_SIZE), color='#0000FF', fill_color='#0000FF'))
+                f.write(svg(sympy.Circle(self.ellipse.center, POINT_SIZE), color='#BBBB00', fill_color='#BBBB00'))
+                f.write(svg(sympy.Circle(self._impact_pos, POINT_SIZE), color='#FF0000', fill_color='#FF0000'))
+
+                f.write('<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}" transform="rotate({})" />'.format(
+                    0, 0, self.circle.hradius, 0, '#FF0000', STROKE_WIDTH,
+                    math.degrees(correct_angle(self._impact_true_anomaly)),
+                ))
+
+                vessel_pos = self.ctrl.impact_manager.calc_pos(orbit=self.ctrl.orbit)
+                f.write(svg(sympy.Circle(vessel_pos, POINT_SIZE), color='#00FF00', fill_color='#00FF00'))
+                f.write('<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}" transform="rotate({})" />'.format(
+                    0, 0, vessel_pos.radius, 0, '#00FF00', STROKE_WIDTH,
+                    math.degrees(correct_angle(vessel_pos.true_anomaly)),
+                ))
+
+                vessel_center_theta = self.ctrl.impact_manager.calc_center_theta(pos=vessel_pos)
+                f.write(svg(sympy.Circle(vessel_pos, POINT_SIZE), color='#00FF00', fill_color='#00FF00'))
+                f.write('<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}" transform="rotate({} {} {})" />'.format(
+                    float(self.ellipse.center.x), 0, float(self.ellipse.center.x) + self.ellipse.hradius, 0, '#00FFFF', STROKE_WIDTH,
+                    math.degrees(correct_angle(vessel_center_theta)), float(self.ellipse.center.x), 0,
+                ))
+
                 f.write('</svg>')
                 f.write('</body></html>')
-                # p1 = plot_implicit(self.ellipse.equation(), show=False)
-                # p2 = plot_implicit(self.circle.equation(), show=False)
-                # p1.append(p2[0])
-                #
-                # # p1._backend = p1.backend(p1)
-                # # fg, ax = p1._backend.fig, p1._backend.ax  # get matplotib's figure and ax
-                # #
-                # # # Use matplotlib to change appearance:
-                # # ax.axis('tight')
-                # # ax.set_aspect("equal")  # 'auto', 'equal' or a positive integer is allowed
-                # # ax.grid(True)
-                #
-                # p1.show()
-
-                break
-        # self.ellipse = sympy.Ellipse(sympy.Point(self.c, 0), self.a, self.b)
-        # self.circle = sympy.Circle(self.focii, self.r)
-
+                f.close()
+                print 'file created'
+                sleep(5.0)
 
     def itegerate_distant(self,
         pos_1=None, orbit_1=None, theta_1=None,
@@ -915,10 +928,16 @@ class ImpactManager(Manager):
 
         x_to_f = radius
         theta = math.pi - math.fabs(true_anomaly)
-        return sympy.Point(
+        output = sympy.Point(
             x_to_f * math.cos(theta),
-            x_to_f * math.sin(theta),
+            x_to_f * -math.sin(theta),
         )
+
+        output.radius = radius
+        output.true_anomaly = true_anomaly
+        # output.theta = theta
+
+        return output
 
     def calc_center_theta(self, pos=None, orbit=None, radius=None, true_anomaly=None):
         # x = our object
@@ -929,7 +948,7 @@ class ImpactManager(Manager):
         x_to_f = float(pos.distance(self.focii))
         x_to_center = float(pos.distance(self.ellipse.center))
         # output = math.acos((x_to_f ** 2 + p_to_f ** 2 - x_to_p ** 2) / (2.0 * x_to_f * p_to_f))
-        return math.acos((x_to_center ** 2 + self.c ** 2 - x_to_f ** 2) / (2.0 * x_to_center * self.c))
+        return -math.acos((x_to_center ** 2 + self.c ** 2 - x_to_f ** 2) / (2.0 * x_to_center * self.c))
 
     def sphere_intersection_time_pos(self, cache=True):
         impact_time_pos = getattr(self, '_impact_time_pos', None)
