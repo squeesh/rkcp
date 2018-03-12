@@ -940,29 +940,28 @@ class ImpactManager(Manager):
             radius = orbit.radius
             true_anomaly = orbit.true_anomaly
 
-        x_to_f = radius
-        theta = math.pi - math.fabs(true_anomaly)
+        theta = true_anomaly + math.pi
         output = sympy.Point(
-            x_to_f * math.cos(theta),
-            x_to_f * -math.sin(theta),
+            radius * math.cos(theta),
+            radius * -math.sin(theta),
         )
 
+        # FOR DEBUG SVG
         output.radius = radius
         output.true_anomaly = true_anomaly
-        # output.theta = theta
 
         return output
 
     def calc_center_theta(self, pos=None, orbit=None, radius=None, true_anomaly=None):
-        # x = our object
         assert pos or orbit or (radius and true_anomaly)
         if not pos:
             pos = self.calc_pos(orbit=orbit, radius=radius, true_anomaly=true_anomaly)
 
-        x_to_f = float(pos.distance(self.focii))
-        x_to_center = float(pos.distance(self.ellipse.center))
-        # output = math.acos((x_to_f ** 2 + p_to_f ** 2 - x_to_p ** 2) / (2.0 * x_to_f * p_to_f))
-        return -math.acos((x_to_center ** 2 + self.c ** 2 - x_to_f ** 2) / (2.0 * x_to_center * self.c))
+        pos_to_f = float(pos.distance(self.focii))
+        pos_to_center = float(pos.distance(self.ellipse.center))
+
+        # In our coordinate system, negative rotations are the "norm" so make this negative...
+        return -math.acos((pos_to_center ** 2 + self.c ** 2 - pos_to_f ** 2) / (2.0 * pos_to_center * self.c))
 
     def sphere_intersection_time_pos(self, cache=True):
         impact_time_pos = getattr(self, '_impact_time_pos', None)
