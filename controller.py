@@ -64,6 +64,7 @@ class Controller(SingletonMixin, object):
             ('apoapsis', (getattr, self.orbit, 'apoapsis')),
             ('periapsis', (getattr, self.orbit, 'periapsis')),
             ('radius', (getattr, self.orbit, 'radius')),
+            ('eccentricity', (getattr, self.orbit, 'eccentricity')),
             ('semi_major_axis', (getattr, self.orbit, 'semi_major_axis')),
             ('semi_minor_axis', (getattr, self.orbit, 'semi_minor_axis')),
             ('true_anomaly', (getattr, self.orbit, 'true_anomaly')),

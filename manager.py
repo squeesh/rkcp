@@ -839,18 +839,12 @@ class ImpactManager(Manager):
         if theta_1 < 0 or theta_1 > theta_2 or theta_2 > math.pi:
             return -1.0
 
-        print 'imp thet: ', math.degrees(theta_1), '|', theta_1
-        print 'ves thet: ', math.degrees(theta_2), '|', theta_2
-
         half_pi = math.pi/2.0
         theta_extra = None
         if theta_2 > half_pi:
             theta_extra = half_pi - (theta_2 - half_pi)
             theta_2 = half_pi
             # dist_offset += self.quater_arc_length
-
-        print 'theta_2: ', math.degrees(theta_2), '|', theta_2
-        print 'theta_e: ', math.degrees(theta_extra or 0), '|', theta_extra
 
         def get_integral_dist(theta_a, theta_b):
             a, b, t, tmin, tmax = self.integral_symbols
@@ -868,19 +862,17 @@ class ImpactManager(Manager):
         base_integral_dist = getattr(self, '_base_integral_dist', None)
 
         if base_integral_dist and (
-            round(self.ctrl.semi_major_axis, 2) != round(self._semi_major_axis, 2) or
-            round(self.ctrl.semi_minor_axis, 2) != round(self._semi_minor_axis, 2)
+            round(self.ctrl.semi_major_axis, 1) != round(self._semi_major_axis, 1) or
+            round(self.ctrl.semi_minor_axis, 1) != round(self._semi_minor_axis, 1)
         ):
             base_integral_dist = None
 
         if theta_extra is None or base_integral_dist is None:
             base_integral_dist = get_integral_dist(theta_1, theta_2)
-            print 'base_dist: ', base_integral_dist
 
         extra_dist = 0
         if theta_extra is not None:
             extra_dist = get_integral_dist(theta_extra, half_pi)
-            print 'extr_dist: ', extra_dist
 
         self._base_integral_dist = base_integral_dist
         self._integral_dist = base_integral_dist + extra_dist
@@ -890,8 +882,8 @@ class ImpactManager(Manager):
         time_dist_pos = getattr(self, '_time_dist_pos', None)
 
         if time_dist_pos and (
-            round(self.ctrl.semi_major_axis, 2) != round(self._semi_major_axis, 2) or
-            round(self.ctrl.semi_minor_axis, 2) != round(self._semi_minor_axis, 2)
+            round(self.ctrl.semi_major_axis, 1) != round(self._semi_major_axis, 1) or
+            round(self.ctrl.semi_minor_axis, 1) != round(self._semi_minor_axis, 1)
         ):
             """Invalid ellipse on change of semi major / minor axis"""
             time_dist_pos = None
@@ -971,7 +963,6 @@ class ImpactManager(Manager):
             # integral_func = self.integral_func.subs(integral_kwargs)
             # self._integral_dist = math.fabs(integral_func.as_sum(n, 'trapezoid'))
 
-
         return self._time_dist_pos
 
     def calc_true_anomaly(self, x):
@@ -985,7 +976,8 @@ class ImpactManager(Manager):
 
     def calc_eccentric_anomaly(self, mean_anomaly):
         E, M = mean_anomaly, mean_anomaly
-        e = self._eccentricity
+        # e = self._eccentricity
+        e = self.ctrl.eccentricity
         while True:
             dE = (E - e * math.sin(E) - M) / (1.0 - e * math.cos(E))
             E -= dE
@@ -996,8 +988,10 @@ class ImpactManager(Manager):
     def calc_pos(self, orbit=None, true_anomaly=None, mean_anomaly=None, eccentric_anomaly=None):
         assert orbit or true_anomaly or mean_anomaly or eccentric_anomaly
 
-        e = self._eccentricity
-        a = self._semi_major_axis
+        # e = self._eccentricity
+        e = self.ctrl.eccentricity
+        # a = self._semi_major_axis
+        a = self.ctrl.semi_major_axis
 
         if orbit is not None:
             radius = orbit.radius
@@ -1038,14 +1032,16 @@ class ImpactManager(Manager):
         impact_time_pos = getattr(self, '_impact_time_pos', None)
 
         if impact_time_pos and (
-            round(self.ctrl.semi_major_axis, 2) != round(self._semi_major_axis, 2) or
-            round(self.ctrl.semi_minor_axis, 2) != round(self._semi_minor_axis, 2)
+            round(self.ctrl.semi_major_axis, 1) != round(self._semi_major_axis, 1) or
+            round(self.ctrl.semi_minor_axis, 1) != round(self._semi_minor_axis, 1)
         ):
             """Invalid ellipse on change of semi major / minor axis"""
             impact_time_pos = None
             print 'invalid intersection_time_pos'
 
         if impact_time_pos is None or not cache:
+            true_anomaly = self.ctrl.true_anomaly
+
             print 'create intersection_time_pos!'
             inter_points = self.sphere_intersection_points(cache=False)
             theta_list = []
@@ -1054,11 +1050,11 @@ class ImpactManager(Manager):
                 # I think the math.pi part is incorrect, perhaps this doesn't handel oblique triangles
                 impact_pos = sympy.Point(*intersection)
                 theta = math.pi - self.calc_true_anomaly(impact_pos) - 2 * math.pi
-                # if theta >= self.true_anomaly:  # TODO: self.true_anomaly is cached here, this changes every instance... this can't be right
-                theta_list.append((theta, impact_pos))
+                if theta >= true_anomaly:
+                    theta_list.append((theta, impact_pos))
 
             if theta_list:
-                impact_true_anomaly, self._impact_pos = sorted(theta_list)[0]
+                impact_true_anomaly, self._impact_pos = sorted(theta_list, key=lambda x: x[0])[0]
                 self._impact_true_anomaly = impact_true_anomaly
                 impact_time = self.ctrl.orbit.ut_at_true_anomaly(impact_true_anomaly)
                 impact_pos = self.ctrl.orbit.position_at(impact_time, self.ctrl.body.non_rotating_reference_frame)
@@ -1072,8 +1068,8 @@ class ImpactManager(Manager):
         intersection_points = getattr(self, '_intersection_points', None)
 
         if intersection_points and (
-            round(self.ctrl.semi_major_axis, 2) != round(self._semi_major_axis, 2) or
-            round(self.ctrl.semi_minor_axis, 2) != round(self._semi_minor_axis, 2)
+            round(self.ctrl.semi_major_axis, 1) != round(self._semi_major_axis, 1) or
+            round(self.ctrl.semi_minor_axis, 1) != round(self._semi_minor_axis, 1)
         ):
             # TODO should include semi minor too
             """Invalid ellipse on change of semi major / minor axis"""
