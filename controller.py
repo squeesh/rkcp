@@ -67,6 +67,10 @@ class Controller(SingletonMixin, object):
             ('semi_major_axis', (getattr, self.orbit, 'semi_major_axis')),
             ('semi_minor_axis', (getattr, self.orbit, 'semi_minor_axis')),
             ('true_anomaly', (getattr, self.orbit, 'true_anomaly')),
+            ('mean_anomaly', (getattr, self.orbit, 'mean_anomaly')),
+            ('eccentric_anomaly', (getattr, self.orbit, 'eccentric_anomaly')),
+            ('longitude_of_ascending_node', (getattr, self.orbit, 'longitude_of_ascending_node')),
+            ('argument_of_periapsis', (getattr, self.orbit, 'argument_of_periapsis')),
 
             ('surface_gravity', (getattr, self.body, 'surface_gravity')),
             ('equatorial_radius', (getattr, self.body, 'equatorial_radius')),

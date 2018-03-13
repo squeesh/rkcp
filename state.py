@@ -583,8 +583,8 @@ class Descent(State):
             curr_second = datetime.now().second
 
             # impact_time, impact_pos = get_sphere_impact_time_pos(self.ctrl)
-            impact_time = 59223.4067737
-            true_imp_time, true_imp_pos = self.ctrl.impact_manager.time_to_impact()
+            # impact_time = 59223.4067737
+            # true_imp_time, true_imp_pos = self.ctrl.impact_manager.time_to_impact()
 
             # ves_pos = self.ctrl.vessel.position(self.ctrl.body.non_rotating_reference_frame)
             # imp_line = self.ctrl.connection.drawing.add_line(impact_pos, ves_pos, self.ctrl.body.non_rotating_reference_frame)
@@ -593,29 +593,64 @@ class Descent(State):
             if curr_second != last_second:
                 print
                 print 'tks: ', i
-                print 'ta: ', math.degrees(self.ctrl.orbit.true_anomaly)
-                ctrl_ut = self.ctrl.ut
-                print 'time to imp: ', to_min_sec_str(impact_time - ctrl_ut)
-                print 'true to imp: ', to_min_sec_str(true_imp_time - ctrl_ut)
-                print 'imp pos: ', self.ctrl.impact_manager._impact_pos
-                print 'quart arc: ', self.ctrl.impact_manager.quater_arc_length
+                # print 'ta: ', math.degrees(self.ctrl.orbit.true_anomaly)
 
-                x1, y1, z1 = true_imp_pos
-                x2, y2, z2 = self.ctrl.vessel.position(self.ctrl.body.reference_frame)
-                dista = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2 + (z2 - z1) ** 2)
+                m_eph = self.ctrl.orbit.mean_anomaly_at_epoch
+                epoch = self.ctrl.orbit.epoch
+                period = self.ctrl.orbit.period
+                rad = self.ctrl.radius
+                t_a = self.ctrl.true_anomaly
+                m_a = self.ctrl.mean_anomaly
+                e_a = self.ctrl.eccentric_anomaly
 
-                # impact_pos = self.ctrl.impact_manager._impact_pos
-                true_imp_true_anomaly = self.ctrl.orbit.true_anomaly_at_ut(true_imp_time)
-                true_imp_radius = self.ctrl.orbit.radius_at(true_imp_time)
-                calc_imp_pos = self.ctrl.impact_manager.calc_pos(radius=true_imp_radius, true_anomaly=true_imp_true_anomaly)
-                calc_vessel_pos = self.ctrl.impact_manager.calc_pos(orbit=self.ctrl.orbit)
-                distb = self.ctrl.impact_manager.itegerate_distant(pos_1=calc_imp_pos, pos_2=calc_vessel_pos)
-                distc = float(calc_vessel_pos.distance(calc_imp_pos))
+                class FakeOrbit():
+                    radius = rad
+                    true_anomaly = t_a
 
-                print 'dista: ', dista
-                print 'distb: ', distb
-                print 'distc: ', distc
-                print 'diff: ', round(((distb - dista) / distb) * 100.0, 4)
+                p_orb = self.ctrl.impact_manager.calc_pos(orbit=FakeOrbit())
+                p_t_a = self.ctrl.impact_manager.calc_pos(true_anomaly=t_a)
+                p_m_a = self.ctrl.impact_manager.calc_pos(mean_anomaly=m_a)
+                p_e_a = self.ctrl.impact_manager.calc_pos(eccentric_anomaly=e_a)
+
+                rotations = epoch / period * math.pi * 2
+                while rotations > math.pi * 2:
+                    rotations -= math.pi * 2
+
+                print epoch, '|', period, '|', epoch / period, '|', math.degrees(rotations)
+                print 'ma_epoch: ', math.degrees(self.ctrl.orbit.mean_anomaly_at_epoch)
+                print 'p_orb:', float(p_orb.x), float(p_orb.y), '|\t', p_orb.radius, \
+                    '|\t', math.degrees(p_orb.true_anomaly)
+                print 'p_t_a:', float(p_t_a.x), float(p_t_a.y), '|\t', p_t_a.radius, \
+                    '|\t', math.degrees(p_t_a.true_anomaly)
+                print 'p_m_a:', float(p_m_a.x), float(p_m_a.y), '|\t', p_m_a.radius, \
+                    '|\t', math.degrees(p_m_a.true_anomaly)
+                print 'p_e_a:', float(p_e_a.x), float(p_e_a.y), '|\t', p_e_a.radius, \
+                    '|\t', math.degrees(p_e_a.true_anomaly)
+
+                # ctrl_ut = self.ctrl.ut
+                # print 'time to imp: ', to_min_sec_str(impact_time - ctrl_ut)
+                # print 'true to imp: ', to_min_sec_str(true_imp_time - ctrl_ut)
+                # print 'imp pos: ', self.ctrl.impact_manager._impact_pos
+                # print 'quart arc: ', self.ctrl.impact_manager.quater_arc_length
+                #
+                # x1, y1, z1 = true_imp_pos
+                # x2, y2, z2 = self.ctrl.vessel.position(self.ctrl.body.reference_frame)
+                # dista = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2 + (z2 - z1) ** 2)
+                #
+                # # impact_pos = self.ctrl.impact_manager._impact_pos
+                # true_imp_true_anomaly = self.ctrl.orbit.true_anomaly_at_ut(true_imp_time)
+                # true_imp_radius = self.ctrl.orbit.radius_at(true_imp_time)
+                # calc_imp_pos = self.ctrl.impact_manager.calc_pos(radius=true_imp_radius, true_anomaly=true_imp_true_anomaly)
+                # calc_vessel_pos = self.ctrl.impact_manager.calc_pos(orbit=self.ctrl.orbit)
+                # distb = self.ctrl.impact_manager.itegerate_distant(pos_1=calc_imp_pos, pos_2=calc_vessel_pos)
+                # distc = float(calc_vessel_pos.distance(calc_imp_pos))
+                #
+                # print 'dista: ', dista
+                # print 'distb: ', distb
+                # print 'distc: ', distc
+                # print 'diff: ', round(((distb - dista) / distb) * 100.0, 4)
+
+
 
                 i = 0
                 last_second = curr_second

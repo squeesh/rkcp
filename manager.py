@@ -683,9 +683,16 @@ class StagingManager(object):
 class ImpactManager(Manager):
     _semi_major_axis = 0.0
     _semi_minor_axis = 0.0
+    _linear_eccentricity = 0.0
+    _radius_pariapsis = 0.0
+    _radius_apoapsis = 0.0
+    _eccentricity = 0.0
 
     _impact_pos = None
     _impact_true_anomaly = None
+
+    ellipse = None
+    circle = None
 
     def __init__(self):
         super(ImpactManager, self).__init__()
@@ -696,6 +703,7 @@ class ImpactManager(Manager):
         self.integral_func = I(sqrt(D(a * cos(t), t, evaluate=True) ** 2 + D(b * sin(t), t, evaluate=True) ** 2), (t, tmin, tmax))
 
     def run(self):
+        self.init_vars()
 
         def svg(e, stroke_width=1., color="#000", fill_color="transparent"):
             """Returns SVG ellipse element for the Ellipse.
@@ -751,26 +759,54 @@ class ImpactManager(Manager):
                         math.degrees(correct_angle(self._impact_true_anomaly)),
                     ))
 
-                vessel_pos = self.ctrl.impact_manager.calc_pos(orbit=self.ctrl.orbit)
-                lines.append(svg(sympy.Circle(vessel_pos, POINT_SIZE), color='#00FF00', fill_color='#00FF00'))
-                lines.append('<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}" transform="rotate({})" />'.format(
-                    0, 0, vessel_pos.radius, 0, '#00FF00', STROKE_WIDTH,
-                    math.degrees(correct_angle(vessel_pos.true_anomaly)),
-                ))
-                lines.append('<text x="{}" y="{}" fill="{}" font-size="{}" transform="scale({})">{}</text>'.format(
-                    -50000 / TEXT_SCALE, 50000 / TEXT_SCALE, '#00FF00', 50,
-                    TEXT_SCALE, round(math.degrees(vessel_pos.true_anomaly), 3),
-                ))
+                rad = self.ctrl.radius
+                t_a = self.ctrl.true_anomaly
+                m_a = self.ctrl.mean_anomaly
+                e_a = self.ctrl.eccentric_anomaly
 
-                vessel_center_theta = self.ctrl.impact_manager.calc_center_theta(pos=vessel_pos)
-                lines.append('<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}" transform="rotate({} {} {})" />'.format(
-                    float(self.ellipse.center.x), 0, float(self.ellipse.center.x) + self.ellipse.hradius, 0, '#00FFFF', STROKE_WIDTH,
-                    math.degrees(correct_angle(vessel_center_theta)), float(self.ellipse.center.x), 0,
-                ))
-                lines.append('<text x="{}" y="{}" fill="{}" font-size="{}" transform="scale({})">{}</text>'.format(
-                    (float(self.ellipse.center.x) - 50000) / TEXT_SCALE, 50000 / TEXT_SCALE, '#00FFFF', 50,
-                    TEXT_SCALE, round(math.degrees(vessel_center_theta), 3),
-                ))
+                class FakeOrbit():
+                    radius = rad
+                    true_anomaly = t_a
+
+                pos_list = [
+                    (self.ctrl.impact_manager.calc_pos(orbit=FakeOrbit()), '#00FF00'),
+                    (self.ctrl.impact_manager.calc_pos(true_anomaly=t_a), '#bbbbbb'),
+                    (self.ctrl.impact_manager.calc_pos(mean_anomaly=m_a), '#FF0000'),
+                    (self.ctrl.impact_manager.calc_pos(eccentric_anomaly=e_a), '#0000FF'),
+                ]
+
+                for pos, color in pos_list:
+                    lines.append(svg(sympy.Circle(pos, POINT_SIZE), color=color, fill_color=color))
+                    lines.append(
+                        '<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}" transform="rotate({})" />'.format(
+                            0, 0, pos.radius, 0, color, STROKE_WIDTH,
+                            math.degrees(correct_angle(pos.true_anomaly)),
+                        ))
+                    # lines.append('<text x="{}" y="{}" fill="{}" font-size="{}" transform="scale({})">{}</text>'.format(
+                    #     -50000 / TEXT_SCALE, 50000 / TEXT_SCALE, '#00FF00', 50,
+                    #     TEXT_SCALE, round(math.degrees(vessel_pos.true_anomaly), 3),
+                    # ))
+
+                # vessel_pos = self.ctrl.impact_manager.calc_pos(orbit=self.ctrl.orbit)
+                # lines.append(svg(sympy.Circle(vessel_pos, POINT_SIZE), color='#00FF00', fill_color='#00FF00'))
+                # lines.append('<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}" transform="rotate({})" />'.format(
+                #     0, 0, vessel_pos.radius, 0, '#00FF00', STROKE_WIDTH,
+                #     math.degrees(correct_angle(vessel_pos.true_anomaly)),
+                # ))
+                # lines.append('<text x="{}" y="{}" fill="{}" font-size="{}" transform="scale({})">{}</text>'.format(
+                #     -50000 / TEXT_SCALE, 50000 / TEXT_SCALE, '#00FF00', 50,
+                #     TEXT_SCALE, round(math.degrees(vessel_pos.true_anomaly), 3),
+                # ))
+
+                # vessel_center_theta = self.ctrl.impact_manager.calc_center_theta(pos=vessel_pos)
+                # lines.append('<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}" transform="rotate({} {} {})" />'.format(
+                #     float(self.ellipse.center.x), 0, float(self.ellipse.center.x) + self.ellipse.hradius, 0, '#00FFFF', STROKE_WIDTH,
+                #     math.degrees(correct_angle(vessel_center_theta)), float(self.ellipse.center.x), 0,
+                # ))
+                # lines.append('<text x="{}" y="{}" fill="{}" font-size="{}" transform="scale({})">{}</text>'.format(
+                #     (float(self.ellipse.center.x) - 50000) / TEXT_SCALE, 50000 / TEXT_SCALE, '#00FFFF', 50,
+                #     TEXT_SCALE, round(math.degrees(vessel_center_theta), 3),
+                # ))
 
                 lines.append('</svg>')
                 lines.append('</body></html>')
@@ -947,11 +983,32 @@ class ImpactManager(Manager):
             output = -output
         return output
 
-    def calc_pos(self, orbit=None, radius=None, true_anomaly=None):
-        assert orbit or (radius and true_anomaly)
+    def calc_eccentric_anomaly(self, mean_anomaly):
+        E, M = mean_anomaly, mean_anomaly
+        e = self._eccentricity
+        while True:
+            dE = (E - e * math.sin(E) - M) / (1.0 - e * math.cos(E))
+            E -= dE
+            if math.fabs(dE) < 1e-12:
+                break
+        return E
+
+    def calc_pos(self, orbit=None, true_anomaly=None, mean_anomaly=None, eccentric_anomaly=None):
+        assert orbit or true_anomaly or mean_anomaly or eccentric_anomaly
+
+        e = self._eccentricity
+        a = self._semi_major_axis
+
         if orbit is not None:
             radius = orbit.radius
             true_anomaly = orbit.true_anomaly
+        elif true_anomaly is None:
+            E = self.calc_eccentric_anomaly(mean_anomaly=mean_anomaly) if mean_anomaly else eccentric_anomaly
+            radius = a * (1.0 - e * math.cos(E))
+            true_anomaly = -2.0 * math.atan2(math.sqrt(1.0 - e) * math.cos(E/2.0), math.sqrt(1.0 + e) * math.sin(E/2.0))
+            true_anomaly += math.pi
+        else:
+            radius = a * ((1.0 - e**2.0) / (1.0 + e * math.cos(true_anomaly)))
 
         theta = true_anomaly + math.pi
         output = sympy.Point(
@@ -962,6 +1019,7 @@ class ImpactManager(Manager):
         # FOR DEBUG SVG
         output.radius = radius
         output.true_anomaly = true_anomaly
+        output.theta = theta
 
         return output
 
@@ -996,8 +1054,8 @@ class ImpactManager(Manager):
                 # I think the math.pi part is incorrect, perhaps this doesn't handel oblique triangles
                 impact_pos = sympy.Point(*intersection)
                 theta = math.pi - self.calc_true_anomaly(impact_pos) - 2 * math.pi
-                if theta >= self.true_anomaly:
-                    theta_list.append((theta, impact_pos))
+                # if theta >= self.true_anomaly:  # TODO: self.true_anomaly is cached here, this changes every instance... this can't be right
+                theta_list.append((theta, impact_pos))
 
             if theta_list:
                 impact_true_anomaly, self._impact_pos = sorted(theta_list)[0]
@@ -1032,14 +1090,22 @@ class ImpactManager(Manager):
     def init_vars(self):
         self._semi_major_axis = self.ctrl.semi_major_axis
         self._semi_minor_axis = self.ctrl.semi_minor_axis
+        self._linear_eccentricity = math.sqrt(self._semi_major_axis**2 - self._semi_minor_axis**2)
+        self._radius_pariapsis = self._semi_major_axis - self._linear_eccentricity
+        self._radius_apoapsis = 2 * self._semi_major_axis - self._linear_eccentricity
+        # self._eccentricity = 1.0 - (2.0 / ((self._radius_apoapsis/self._radius_pariapsis) + 1.0))
+        self._eccentricity = math.sqrt(1.0 - (self._semi_minor_axis / self._semi_major_axis)**2.0)
+        self._longitude_of_ascending_node = self.ctrl.longitude_of_ascending_node
+        self._argument_of_periapsis = self.ctrl.argument_of_periapsis
 
         self.r = self.ctrl.equatorial_radius
         self.a = self._semi_major_axis
         self.b = self._semi_minor_axis
-        self.c = math.sqrt(self.a**2 - self.b**2)  # linear eccentricity
+        self.c = self._linear_eccentricity
 
-        self.periapsis = sympy.Point(self.a - self.c, 0)
-        self.true_anomaly = self.ctrl.true_anomaly
+        self.periapsis = sympy.Point(self._radius_pariapsis, 0)
+        self.apoapsis = sympy.Point(self._radius_apoapsis, 0)
+        # self.true_anomaly = self.ctrl.true_anomaly
         self.focii = sympy.Point(0, 0)
         self.ellipse = sympy.Ellipse(sympy.Point(self.c, 0), self.a, self.b)
         self.circle = sympy.Circle(self.focii, self.r)
