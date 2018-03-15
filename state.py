@@ -645,13 +645,15 @@ class Descent(State):
                 true_imp_true_anomaly = -self.ctrl.orbit.true_anomaly_at_radius(true_imp_radius)
 
                 # true_imp_radius = self.ctrl.orbit.radius_at(true_imp_time)
-                calc_imp_pos = self.ctrl.impact_manager.calc_pos(true_anomaly=true_imp_true_anomaly)
+                apx_calc_imp_pos = self.ctrl.impact_manager.calc_pos(true_anomaly=true_imp_true_anomaly, basic_point=True)
+                int_calc_imp_pos = self.ctrl.impact_manager.calc_pos(true_anomaly=true_imp_true_anomaly)
                 # calc_vessel_pos = self.ctrl.impact_manager.calc_pos(orbit=self.ctrl.orbit)
 
-                p_orb = self.ctrl.impact_manager.calc_pos(orbit=FakeOrbit())
-                p_t_a = self.ctrl.impact_manager.calc_pos(true_anomaly=t_a)
-                p_m_a = self.ctrl.impact_manager.calc_pos(mean_anomaly=m_a)
-                p_e_a = self.ctrl.impact_manager.calc_pos(eccentric_anomaly=e_a)
+                apx_p_orb = self.ctrl.impact_manager.calc_pos(orbit=FakeOrbit(), basic_point=True)
+                int_p_orb = self.ctrl.impact_manager.calc_pos(orbit=FakeOrbit())
+                # p_t_a = self.ctrl.impact_manager.calc_pos(true_anomaly=t_a)
+                # p_m_a = self.ctrl.impact_manager.calc_pos(mean_anomaly=m_a)
+                # p_e_a = self.ctrl.impact_manager.calc_pos(eccentric_anomaly=e_a)
 
                 print
                 print 'tks: ', i
@@ -664,14 +666,15 @@ class Descent(State):
                 # print 'quart arc: ', self.ctrl.impact_manager.quater_arc_length
                 #
                 print 'dist_bse:', math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2 + (z2 - z1) ** 2)
-                print 'dist_int:', self.ctrl.impact_manager.itegerate_distant(pos_1=calc_imp_pos, pos_2=p_orb)
-                print 'dist_orb:', float(p_orb.distance(calc_imp_pos))
-                print 'dist_t_a:', float(p_t_a.distance(calc_imp_pos))
-                print 'dist_m_a:', float(p_m_a.distance(calc_imp_pos))
-                print 'dist_e_a:', float(p_e_a.distance(calc_imp_pos))
-                print 'dist_ray:', ray_dist_stream()
+                print 'dist_apx:', self.ctrl.impact_manager.approximate_distance(pos_1=apx_calc_imp_pos, pos_2=apx_p_orb, n=1000)
+                # print 'dist_int:', self.ctrl.impact_manager.itegerate_distant(pos_1=int_calc_imp_pos, pos_2=int_p_orb)
+                print 'dist_orb:', float(int_p_orb.distance(int_calc_imp_pos))
+                # print 'dist_t_a:', float(p_t_a.distance(calc_imp_pos))
+                # print 'dist_m_a:', float(p_m_a.distance(calc_imp_pos))
+                # print 'dist_e_a:', float(p_e_a.distance(calc_imp_pos))
+                # print 'dist_ray:', ray_dist_stream()
 
-                print self.ctrl.impact_manager.approximate_distance(pos_1=calc_imp_pos, pos_2=p_orb)
+
 
                 #
                 # print 'dista: ', dista
