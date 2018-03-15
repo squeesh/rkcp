@@ -670,6 +670,9 @@ class Descent(State):
                 print 'dist_m_a:', float(p_m_a.distance(calc_imp_pos))
                 print 'dist_e_a:', float(p_e_a.distance(calc_imp_pos))
                 print 'dist_ray:', ray_dist_stream()
+
+                print self.ctrl.impact_manager.approximate_distance(pos_1=calc_imp_pos, pos_2=p_orb)
+
                 #
                 # print 'dista: ', dista
                 # print 'distb: ', distb

@@ -775,13 +775,16 @@ class ImpactManager(Manager):
                     (self.ctrl.impact_manager.calc_pos(eccentric_anomaly=e_a), '#0000FF'),
                 ]
 
-                for pos, color in pos_list:
+
+                # print 'REAL anomaly:', t_a
+                for i, (pos, color) in enumerate(pos_list):
                     lines.append(svg(sympy.Circle(pos, POINT_SIZE), color=color, fill_color=color))
                     lines.append(
                         '<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}" transform="rotate({})" />'.format(
                             0, 0, pos.radius, 0, color, STROKE_WIDTH,
                             math.degrees(correct_angle(pos.true_anomaly)),
                         ))
+                    # print 'POS{} anomaly: {}'.format(i, pos.true_anomaly)
                     # lines.append('<text x="{}" y="{}" fill="{}" font-size="{}" transform="scale({})">{}</text>'.format(
                     #     -50000 / TEXT_SCALE, 50000 / TEXT_SCALE, '#00FF00', 50,
                     #     TEXT_SCALE, round(math.degrees(vessel_pos.true_anomaly), 3),
@@ -816,6 +819,49 @@ class ImpactManager(Manager):
                 f.close()
                 print 'file created'
                 sleep(5.0)
+
+    def approximate_distance(self,
+        pos_1=None, true_anomaly_1=None,
+        pos_2=None, true_anomaly_2=None,
+        n=2,
+    ):
+        assert (pos_1 or true_anomaly_1) and (pos_2 or true_anomaly_2)
+
+        if true_anomaly_1:
+            pos_1 = self.calc_pos(true_anomaly=true_anomaly_1)
+
+        if true_anomaly_2:
+            pos_2 = self.calc_pos(true_anomaly=true_anomaly_2)
+
+        e = self.ctrl.eccentricity
+        a = self.ctrl.semi_major_axis
+
+        print 'e: ', e
+        print 'a: ', a
+
+        base_distance = pos_1.distance(pos_2)
+
+        # radius = a * ((1.0 - e ** 2.0) / (1.0 + e * math.cos(true_anomaly)))
+        # radius = (a - (a*e)**2.0) / (1.0 + e * math.cos(true_anomaly))
+        # (1.0 + e * math.cos(true_anomaly)) * radius = (a - (a*e)**2.0)
+        # 1.0 + e * math.cos(true_anomaly) = (a - (a*e)**2.0) / radius
+        # math.cos(true_anomaly) = ((a - (a*e)**2.0) / radius - 1.0) / e
+
+        radius_1 = float(self.circle.center.distance(pos_2))
+        print 'radius_1: ', radius_1
+
+        true_anomaly = -math.acos((-a * e ** 2 + a - radius_1) / (e * radius_1))
+        # true_anomaly = math.acos(((a - (a*e)**2.0) / radius_1 - 1.0) / e)
+        print 'r anomly: ', self.ctrl.true_anomaly
+        print 't anomly: ', true_anomaly
+        c_anomaly = self.calc_true_anomaly(pos_2)
+        print 'c anomly: ', c_anomaly
+
+        radius_2 = a * ((1.0 - e ** 2.0) / (1.0 + e * math.cos(true_anomaly)))
+        print 'radius_2: ', radius_2
+
+        return 55
+
 
     def itegerate_distant(self,
         pos_1=None, orbit_1=None, theta_1=None,
@@ -969,10 +1015,7 @@ class ImpactManager(Manager):
         x_to_p = float(x.distance(self.periapsis))
         x_to_f = float(x.distance(self.focii))
         p_to_f = self.a - self.c
-        output = math.acos((x_to_f ** 2 + p_to_f ** 2 - x_to_p ** 2) / (2.0 * x_to_f * p_to_f))
-        if x.y < 0:
-            output = -output
-        return output
+        return math.acos((x_to_f ** 2 + p_to_f ** 2 - x_to_p ** 2) / (2.0 * x_to_f * p_to_f)) - math.pi
 
     def calc_eccentric_anomaly(self, mean_anomaly):
         E, M = mean_anomaly, mean_anomaly
@@ -996,13 +1039,13 @@ class ImpactManager(Manager):
         if orbit is not None:
             radius = orbit.radius
             true_anomaly = orbit.true_anomaly
-        elif true_anomaly is None:
+        elif true_anomaly:
+            radius = a * ((1.0 - e ** 2.0) / (1.0 + e * math.cos(true_anomaly)))
+        else:
             E = self.calc_eccentric_anomaly(mean_anomaly=mean_anomaly) if mean_anomaly else eccentric_anomaly
             radius = a * (1.0 - e * math.cos(E))
             true_anomaly = -2.0 * math.atan2(math.sqrt(1.0 - e) * math.cos(E/2.0), math.sqrt(1.0 + e) * math.sin(E/2.0))
             true_anomaly += math.pi
-        else:
-            radius = a * ((1.0 - e**2.0) / (1.0 + e * math.cos(true_anomaly)))
 
         theta = true_anomaly + math.pi
         output = sympy.Point(
@@ -1049,7 +1092,7 @@ class ImpactManager(Manager):
             for intersection in inter_points:
                 # I think the math.pi part is incorrect, perhaps this doesn't handel oblique triangles
                 impact_pos = sympy.Point(*intersection)
-                theta = math.pi - self.calc_true_anomaly(impact_pos) - 2 * math.pi
+                theta = self.calc_true_anomaly(impact_pos)
                 if theta >= true_anomaly:
                     theta_list.append((theta, impact_pos))
 
