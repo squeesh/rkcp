@@ -1,6 +1,7 @@
 from time import sleep
 from threading import Thread, Lock, Condition
 import krpc
+from krpc.error import StreamError
 from datetime import datetime
 from collections import defaultdict
 from functools import partial
@@ -90,7 +91,10 @@ class Controller(SingletonMixin, object):
                         print 'opening stream: {}'.format(name)
                         self._stream_dict[name] = self.connection.add_stream(*stream_args)
                         self._streams_open += 1
-            return self._stream_dict[name]()
+            try:
+                return self._stream_dict[name]()
+            except StreamError:
+                return 0.0
 
         self._stream_dict = {}
         for name, stream_args in stream_funcs:
@@ -231,6 +235,10 @@ class Controller(SingletonMixin, object):
     @property
     def orbit(self):
         return self.vessel.orbit
+
+    @property
+    def linear_eccentricity(self):
+        return math.sqrt(self.semi_major_axis**2 - self.semi_minor_axis**2)
 
     @property
     def body(self):
