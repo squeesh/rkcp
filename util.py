@@ -357,7 +357,7 @@ def get_suicide_burn_time(vi, dist, use_local_g=False, ctrl=None):
     return top / bottom
 
 
-def get_suicide_burn_alt(vi, use_local_g=False, ctrl=None):
+def get_suicide_burn_distance(vi, use_local_g=False, ctrl=None):
     if not ctrl:
         from controller import Controller
         ctrl = Controller.get()

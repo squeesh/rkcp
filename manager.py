@@ -720,7 +720,7 @@ class ImpactManager(Manager):
     periapsis = 0
     apoapsis = 0
 
-    focii = None
+    focii = BasicPoint(0, 0)
     ellipse = None
     circle = None
 
@@ -852,6 +852,14 @@ class ImpactManager(Manager):
                 print 'file created'
                 sleep(5.0)
 
+    def calc_suicide_burn_radius(self, initial_velocity, impact_pos):
+        mi = self.ctrl.mass
+        g = self.ctrl.surface_gravity
+        thrust = self.ctrl.available_thrust
+        accel = thrust / mi - g
+        dist_to_stop = (initial_velocity ** 2.0) / (2.0 * accel)
+        return self.calc_radius(pos=impact_pos) + dist_to_stop
+
     def approximate_distance(self,
         pos_1=None, true_anomaly_1=None,
         pos_2=None, true_anomaly_2=None,
@@ -863,13 +871,13 @@ class ImpactManager(Manager):
             pos_1_radius = float(pos_1.distance(BasicPoint(0.0, 0.0)))
         else:
             pos_1_radius = self.calc_radius(true_anomaly=true_anomaly_1)
-            pos_1 = self.calc_pos(radius=pos_1_radius, true_anomaly=true_anomaly_1, basic_point=True)
+            pos_1 = self.calc_pos(radius=pos_1_radius, true_anomaly=true_anomaly_1)
 
         if pos_2:
             pos_2_radius = float(pos_2.distance(BasicPoint(0.0, 0.0)))
         else:
             pos_2_radius = self.calc_radius(true_anomaly=true_anomaly_2)
-            pos_2 = self.calc_pos(radius=pos_1_radius, true_anomaly=true_anomaly_2, basic_point=True)
+            pos_2 = self.calc_pos(radius=pos_1_radius, true_anomaly=true_anomaly_2)
 
         if pos_2_radius > pos_1_radius:
             base_radius = pos_1_radius
@@ -900,7 +908,7 @@ class ImpactManager(Manager):
             # print 'calc: ', ((i / float(n+1)) * radius_diff), '|', (base_radius + ((i / float(n)) * radius_diff))
             point_radius = base_radius + ((i / float(n)) * radius_diff)
             point_true_anomaly = -math.acos((-a * e ** 2 + a - point_radius) / (e * point_radius))
-            approx_point = self.calc_pos(radius=point_radius, true_anomaly=point_true_anomaly, basic_point=True)
+            approx_point = self.calc_pos(radius=point_radius, true_anomaly=point_true_anomaly)
 
             approx_distance += float(curr_point.distance(approx_point))
             curr_point = approx_point
@@ -913,7 +921,7 @@ class ImpactManager(Manager):
         self._approx_points.append(end_point)
         return approx_distance
 
-    def time_to_impact(self):
+    def impact_time_pos(self):
         time_dist_pos = getattr(self, '_time_dist_pos', None)
 
         # if time_dist_pos and (
@@ -977,16 +985,19 @@ class ImpactManager(Manager):
             self._time_dist_pos = (base_ut + probe_time, probe_pos)
         return self._time_dist_pos
 
-    def calc_radius(self, true_anomaly=None, mean_anomaly=None, eccentric_anomaly=None):
-        assert true_anomaly or mean_anomaly or eccentric_anomaly
-        a = self.ctrl.semi_major_axis
-        e = self.ctrl.eccentricity
-
-        if true_anomaly:
-            return a * ((1.0 - e ** 2.0) / (1.0 + e * math.cos(true_anomaly)))
+    def calc_radius(self, pos=None, true_anomaly=None, mean_anomaly=None, eccentric_anomaly=None):
+        assert pos or true_anomaly or mean_anomaly or eccentric_anomaly
+        if pos:
+            return pos.distance(self.focii)
         else:
-            E = self.calc_eccentric_anomaly(mean_anomaly=mean_anomaly) if mean_anomaly else eccentric_anomaly
-            return a * (1.0 - e * math.cos(E))
+            a = self.ctrl.semi_major_axis
+            e = self.ctrl.eccentricity
+
+            if true_anomaly:
+                return a * ((1.0 - e ** 2.0) / (1.0 + e * math.cos(true_anomaly)))
+            else:
+                E = self.calc_eccentric_anomaly(mean_anomaly=mean_anomaly) if mean_anomaly else eccentric_anomaly
+                return a * (1.0 - e * math.cos(E))
 
     def calc_true_anomaly(self, pos=None, radius=None):
         assert pos or radius
@@ -1010,7 +1021,7 @@ class ImpactManager(Manager):
                 break
         return E
 
-    def calc_pos(self, orbit=None, radius=None, true_anomaly=None, mean_anomaly=None, eccentric_anomaly=None, basic_point=False):
+    def calc_pos(self, orbit=None, radius=None, true_anomaly=None, mean_anomaly=None, eccentric_anomaly=None):
         assert orbit or radius or true_anomaly or mean_anomaly or eccentric_anomaly
 
         if radius is not None and true_anomaly is not None:
@@ -1019,9 +1030,9 @@ class ImpactManager(Manager):
             radius = orbit.radius
             true_anomaly = orbit.true_anomaly
         elif true_anomaly is not None:
-            radius = self.calc_radius(true_anomaly)
+            radius = self.calc_radius(true_anomaly=true_anomaly)
         elif radius is not None:
-            true_anomaly = self.calc_true_anomaly(radius)
+            true_anomaly = self.calc_true_anomaly(radius=radius)
         else:
             e = self.ctrl.eccentricity
             a = self.ctrl.semi_major_axis
@@ -1031,16 +1042,10 @@ class ImpactManager(Manager):
             true_anomaly += math.pi
 
         theta = true_anomaly + math.pi
-        if basic_point:
-            output = BasicPoint(
-                radius * math.cos(theta),
-                radius * -math.sin(theta),
-            )
-        else:
-            output = sympy.Point(
-                radius * math.cos(theta),
-                radius * -math.sin(theta),
-            )
+        output = BasicPoint(
+            radius * math.cos(theta),
+            radius * -math.sin(theta),
+        )
 
         # FOR DEBUG SVG
         output.radius = radius
@@ -1115,6 +1120,10 @@ class ImpactManager(Manager):
         if intersection_points is None:# or not cache:
             # print 'create intersection points!'
             # self.init_vars()
+
+            while self.circle is None:
+                print 'circle none...'
+
             self._intersection_points = \
                 sorted(list(set([(float(point.x), float(point.y)) for point in self.ellipse.intersection(self.circle)])))
         return self._intersection_points
@@ -1149,7 +1158,7 @@ class ImpactManager(Manager):
         self.periapsis = BasicPoint(radius_pariapsis, 0)
         self.apoapsis = BasicPoint(radius_apoapsis, 0)
         # self.true_anomaly = self.ctrl.true_anomaly
-        self.focii = BasicPoint(0, 0)
+        # self.focii = BasicPoint(0, 0)
         self.ellipse = sympy.Ellipse(sympy.Point(linear_eccentricity, 0), self._semi_major_axis, self._semi_minor_axis)
         self.circle = sympy.Circle(sympy.Point(0, 0), self.ctrl.equatorial_radius)
 

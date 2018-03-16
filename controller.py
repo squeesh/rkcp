@@ -209,8 +209,8 @@ class Controller(SingletonMixin, object):
         # else:
         #     self._NextStateCls = AscentState
 
-        self._NextStateCls = Descent
-        # self._NextStateCls = SuicideBurn
+        # self._NextStateCls = Descent
+        self._NextStateCls = SuicideBurn
         # self._NextStateCls = TransitionToHover
         # self._NextStateCls = EnrouteToTarget
 

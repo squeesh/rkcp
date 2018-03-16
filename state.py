@@ -6,7 +6,7 @@ from functools import partial
 
 
 from util import get_avail_twr, get_burn_time_for_dv, get_vessel_pitch_heading, angle_between, get_pitch_heading, \
-    find_true_impact_time, get_speed_after_time, get_speed_after_distance, get_suicide_burn_time, get_suicide_burn_alt, \
+    find_true_impact_time, get_speed_after_time, get_speed_after_distance, get_suicide_burn_time, get_suicide_burn_distance, \
     to_min_sec_str, get_seconds_to_impact, rotate_vector, get_sphere_impact_time_pos
 from manager import PitchManager
 
@@ -578,167 +578,7 @@ class Descent(State):
 
         ReferenceFrame = self.ctrl.space_center.ReferenceFrame
 
-        ray_dist_stream = self.ctrl.connection.add_stream(
-            self.ctrl.space_center.raycast_distance,
-            (0, 5, 0),
-            (0, 1, 0),
-            self.ctrl.vessel.surface_velocity_reference_frame)
-
         vessel_position_stream = self.ctrl.connection.add_stream(self.ctrl.vessel.position, self.ctrl.body.reference_frame)
-
-        while True:
-            i += 1
-            curr_second = datetime.now().second
-
-            # impact_time, impact_pos = get_sphere_impact_time_pos(self.ctrl)
-            # impact_time = 59223.4067737
-            true_imp_time, true_imp_pos = self.ctrl.impact_manager.time_to_impact()
-
-            # ves_pos = self.ctrl.vessel.position(self.ctrl.body.non_rotating_reference_frame)
-            # imp_line = self.ctrl.connection.drawing.add_line(impact_pos, ves_pos, self.ctrl.body.non_rotating_reference_frame)
-            # imp_line.color = (1, 1, 1)
-
-
-
-
-            # m_eph = self.ctrl.orbit.mean_anomaly_at_epoch
-            # epoch = self.ctrl.orbit.epoch
-            # period = self.ctrl.orbit.period
-            rad = self.ctrl.radius
-            t_a = self.ctrl.true_anomaly
-            # m_a = self.ctrl.mean_anomaly
-            # e_a = self.ctrl.eccentric_anomaly
-
-            class FakeOrbit():
-                radius = rad
-                true_anomaly = t_a
-            #
-            # p_orb = self.ctrl.impact_manager.calc_pos(orbit=FakeOrbit())
-            # p_t_a = self.ctrl.impact_manager.calc_pos(true_anomaly=t_a)
-            # p_m_a = self.ctrl.impact_manager.calc_pos(mean_anomaly=m_a)
-            # p_e_a = self.ctrl.impact_manager.calc_pos(eccentric_anomaly=e_a)
-            #
-            # rotations = epoch / period * math.pi * 2
-            # while rotations > math.pi * 2:
-            #     rotations -= math.pi * 2
-            #
-            # print epoch, '|', period, '|', epoch / period, '|', math.degrees(rotations)
-            # print 'ma_epoch: ', math.degrees(self.ctrl.orbit.mean_anomaly_at_epoch)
-            # print 'p_orb:', float(p_orb.x), float(p_orb.y), '|\t', p_orb.radius, \
-            #     '|\t', math.degrees(p_orb.true_anomaly)
-            # print 'p_t_a:', float(p_t_a.x), float(p_t_a.y), '|\t', p_t_a.radius, \
-            #     '|\t', math.degrees(p_t_a.true_anomaly)
-            # print 'p_m_a:', float(p_m_a.x), float(p_m_a.y), '|\t', p_m_a.radius, \
-            #     '|\t', math.degrees(p_m_a.true_anomaly)
-            # print 'p_e_a:', float(p_e_a.x), float(p_e_a.y), '|\t', p_e_a.radius, \
-            #     '|\t', math.degrees(p_e_a.true_anomaly)
-
-
-            x1, y1, z1 = true_imp_pos
-            # x2, y2, z2 = self.ctrl.vessel.position(self.ctrl.body.reference_frame)
-            x2, y2, z2 = vessel_position_stream()
-
-            true_imp_radius = math.sqrt(sum([val ** 2 for val in true_imp_pos]))
-
-            # # impact_pos = self.ctrl.impact_manager._impact_pos
-            # true_imp_true_anomaly = self.ctrl.orbit.true_anomaly_at_ut(true_imp_time)
-
-            # TIME'S RESOLUTION IS TOO LOW FOR ACCURATE UP CLOSE DISTANCES
-
-            true_imp_true_anomaly = self.ctrl.impact_manager.calc_true_anomaly(radius=true_imp_radius)
-            # true_imp_true_anomaly = -self.ctrl.orbit.true_anomaly_at_radius(true_imp_radius)
-            # print 'a:', a_imp_true_anomaly
-            # print 'b:', true_imp_true_anomaly
-            # print
-
-            # true_imp_radius = self.ctrl.orbit.radius_at(true_imp_time)
-            apx_calc_imp_pos = self.ctrl.impact_manager.calc_pos(true_anomaly=true_imp_true_anomaly, basic_point=True)
-            # int_calc_imp_pos = self.ctrl.impact_manager.calc_pos(true_anomaly=true_imp_true_anomaly)
-            # calc_vessel_pos = self.ctrl.impact_manager.calc_pos(orbit=self.ctrl.orbit)
-
-            apx_p_orb = self.ctrl.impact_manager.calc_pos(orbit=FakeOrbit(), basic_point=True)
-            # int_p_orb = self.ctrl.impact_manager.calc_pos(orbit=FakeOrbit())
-            # p_t_a = self.ctrl.impact_manager.calc_pos(true_anomaly=t_a)
-            # p_m_a = self.ctrl.impact_manager.calc_pos(mean_anomaly=m_a)
-            # p_e_a = self.ctrl.impact_manager.calc_pos(eccentric_anomaly=e_a)
-
-            dist_apx_100 = self.ctrl.impact_manager.approximate_distance(pos_1=apx_calc_imp_pos, pos_2=apx_p_orb, n=100)
-
-            if curr_second != last_second:
-                ctrl_ut = self.ctrl.ut
-
-                print
-                print 'tks: ', i
-                # print 'semi minor:', self.ctrl.impact_manager._semi_minor_axis
-                # print 'semi major:', self.ctrl.impact_manager._semi_major_axis
-                print 'imp time: ', true_imp_time
-                # print 'time to imp: ', to_min_sec_str(impact_time - ctrl_ut)
-                print 'true to imp: ', to_min_sec_str(true_imp_time - ctrl_ut)
-                # print 'imp pos: ', self.ctrl.impact_manager._impact_pos
-                # print 'quart arc: ', self.ctrl.impact_manager.quater_arc_length
-
-                dist_apx_1k = self.ctrl.impact_manager.approximate_distance(pos_1=apx_calc_imp_pos, pos_2=apx_p_orb, n=1000)
-                dist_apx_10k = self.ctrl.impact_manager.approximate_distance(pos_1=apx_calc_imp_pos, pos_2=apx_p_orb, n=10000)
-
-                print 'dist_bse:', math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2 + (z2 - z1) ** 2)
-                print 'dist_100:', dist_apx_100
-                print 'dist__1k:', dist_apx_1k
-                print 'dist_10k:', dist_apx_10k
-                # print 'dist_int:', self.ctrl.impact_manager.itegerate_distant(pos_1=int_calc_imp_pos, pos_2=int_p_orb)
-                # print 'dist_orb:', float(int_p_orb.distance(int_calc_imp_pos))
-                # print 'dist_t_a:', float(p_t_a.distance(calc_imp_pos))
-                # print 'dist_m_a:', float(p_m_a.distance(calc_imp_pos))
-                # print 'dist_e_a:', float(p_e_a.distance(calc_imp_pos))
-                # print 'dist_ray:', ray_dist_stream()
-
-
-                # print 'dista: ', dista
-                # print 'distb: ', distb
-                # print 'distc: ', distc
-                # print 'diff: ', round(((distb - dista) / distb) * 100.0, 4)
-
-                i = 0
-                last_second = curr_second
-
-            # print 'alt at: ', round(self.ctrl.body.altitude_at_position(impact_pos, self.ctrl.body.reference_frame), 3)
-            #
-            # lat = self.ctrl.body.latitude_at_position(impact_pos, self.ctrl.body.reference_frame)
-            # lng = self.ctrl.body.longitude_at_position(impact_pos, self.ctrl.body.reference_frame)
-            # height = self.ctrl.body.surface_height(lat, lng)
-            # print 'hgt at: ', height
-
-            # old_lines = lines
-            # lines = []
-            #
-            # rel_ref_frame = ReferenceFrame.create_hybrid(
-            #     position=self.ctrl.vessel.surface_reference_frame,
-            #     rotation=self.ctrl.body.reference_frame,
-            # )
-            #
-            # for i, offset in enumerate((
-            #     (1, 0, 0),  # x: red
-            #     (0, 1, 0),  # y: green
-            #     (0, 0, 1),  # z: blue
-            # )):
-            #     pos_offset = [offset[j] * 10.0 for j in range(3)]
-            #
-            #     lines.append(self.ctrl.connection.drawing.add_line((0, 0, 0), pos_offset, rel_ref_frame))
-            #     lines[-1].color = offset
-            #
-            # vec_rpd = self.ctrl.orbit.reference_plane_direction(rel_ref_frame)
-            # rpd = [v*10 for v in vec_rpd]
-            # lines.append(self.ctrl.connection.drawing.add_line((0, 0, 0), rpd, rel_ref_frame))
-            # lines[-1].color = (1, 1, 0)
-            #
-            # theta = self.ctrl.orbit.longitude_of_ascending_node
-            # rotation_axis = self.ctrl.orbit.reference_plane_normal(rel_ref_frame)
-            # vec_rpd_rot = rotate_vector(vec_rpd, theta, rotation_axis)
-            # rpd_rot = [v*10 for v in vec_rpd_rot]
-            # lines.append(self.ctrl.connection.drawing.add_line((0, 0, 0), rpd_rot, rel_ref_frame))
-            # lines[-1].color = (0, 1, 1)
-            #
-            # for line in old_lines:
-            #     line.remove()
 
         self.ctrl.pitch_follow = PitchManager.SURFACE_RETROGRADE
         self.ctrl.vessel.auto_pilot.engage()
@@ -746,16 +586,21 @@ class Descent(State):
         # self.ctrl.vessel.auto_pilot.stopping_time = (0.15, 0.15, 0.15)
 
         surf_flight = self.ctrl.vessel.flight(self.ctrl.body.reference_frame)
-        cal_time_to_impact, cal_dist, cal_impact_pos, cal_impact_ref_frame = find_true_impact_time(self.ctrl.vessel, ctrl=self.ctrl)
+        cal_impact_time, cal_impact_pos = self.ctrl.impact_manager.impact_time_pos()
+        cal_impact_radius = math.sqrt(sum([val ** 2 for val in cal_impact_pos]))
+
+        cal_time_to_impact = cal_impact_time - self.ctrl.ut
 
         vf = get_speed_after_time(surf_flight.speed, cal_time_to_impact, ctrl=self.ctrl)
-        suicide_burn_time = get_suicide_burn_time(vf, cal_dist, ctrl=self.ctrl)
+        vessel_pos = self.ctrl.impact_manager.calc_pos(true_anomaly=self.ctrl.true_anomaly)
+        aprox_dist = self.ctrl.impact_manager.approximate_distance(pos_1=self.ctrl.impact_manager.calc_pos(radius=cal_impact_radius), pos_2=vessel_pos, n=100)
+        suicide_burn_time = get_suicide_burn_time(vf, aprox_dist, ctrl=self.ctrl)
 
         print 'tti: ', cal_time_to_impact
         print 'sbt: ', suicide_burn_time
 
         # This will always be higher then the true burn point due to using surface gravity in our vf calc
-        self.ctrl.space_center.warp_to((self.ctrl.ut + cal_time_to_impact) - (suicide_burn_time + 45))
+        self.ctrl.space_center.warp_to(cal_impact_time - (suicide_burn_time + 45))
 
         sleep(15.0)
         # self.ctrl.vessel.auto_pilot.wait(3.0)
@@ -794,19 +639,19 @@ class SuicideBurn(State):
         self.ctrl.vessel.auto_pilot.target_roll = 0
         # self.ctrl.vessel.auto_pilot.stopping_time = (0.15, 0.15, 0.15)
 
-        cal_time_to_impact, cal_dist, cal_impact_pos, cal_impact_ref_frame = find_true_impact_time(self.ctrl.vessel,  ctrl=self.ctrl)
+        # cal_time_to_impact, cal_dist, cal_impact_pos, cal_impact_ref_frame = self.ctrl.impact_manager.impact_time_pos()
 
         body_reference_frame = self.ctrl.body.reference_frame
         surface_velocity_reference_frame = self.ctrl.vessel.surface_velocity_reference_frame
 
-        ray_line = self.ctrl.connection.drawing.add_line((0, 5, 0), (0, 1, 0), surface_velocity_reference_frame)
-        ray_line.color = (0, 1.0, 0)
-
-        ray_dist_stream = self.ctrl.connection.add_stream(
-            self.ctrl.space_center.raycast_distance,
-            (0, 5, 0),
-            (0, 1, 0),
-            surface_velocity_reference_frame)
+        # ray_line = self.ctrl.connection.drawing.add_line((0, 5, 0), (0, 1, 0), surface_velocity_reference_frame)
+        # ray_line.color = (0, 1.0, 0)
+        #
+        # ray_dist_stream = self.ctrl.connection.add_stream(
+        #     self.ctrl.space_center.raycast_distance,
+        #     (0, 5, 0),
+        #     (0, 1, 0),
+        #     surface_velocity_reference_frame)
 
         surf_flight = self.ctrl.vessel.flight(body_reference_frame)
         surf_speed_stream = self.ctrl.connection.add_stream(getattr, surf_flight, 'speed')
@@ -827,48 +672,56 @@ class SuicideBurn(State):
         suicide_burn_stop_event = conn.krpc.add_event(suicide_burn_stop_expr)
 
         # legs = self.ctrl.get_parts_of_type('leg')
-        can_trust_ray = False
+        # can_trust_ray = False
 
         while True:
-            ray_dist = ray_dist_stream()
+            # ray_dist = ray_dist_stream()
             surf_flight_speed = surf_speed_stream()
             surf_vertical_speed = surf_vertical_speed_stream()
 
-            ray_time_to_impact = get_seconds_to_impact(surf_flight_speed, ray_dist, ctrl=self.ctrl)
-            if cnt % 20 == 0 and ray_time_to_impact != float('inf'):
-                ray_impact_time = self.ctrl.ut + ray_time_to_impact
+            cal_impact_time, cal_impact_pos = self.ctrl.impact_manager.impact_time_pos()
+            cal_impact_radius = math.sqrt(sum([val ** 2 for val in cal_impact_pos]))
+            cal_impact_pos_from_radius = self.ctrl.impact_manager.calc_pos(radius=cal_impact_radius)
 
-                # body_rot = math.pi * ray_impact_time / rotational_period
-                # ray_ref_frame = ReferenceFrame.create_relative(
-                #     body_reference_frame, rotation=(0, math.sin(body_rot), 0, math.cos(body_rot)))
-                ray_ref_frame = body_reference_frame
+            vessel_pos = self.ctrl.impact_manager.calc_pos(true_anomaly=self.ctrl.true_anomaly)
+            vessel_radius = self.ctrl.impact_manager.calc_radius(pos=vessel_pos)
+            aprox_dist = self.ctrl.impact_manager.approximate_distance(pos_1=cal_impact_pos_from_radius, pos_2=vessel_pos, n=100)
 
-                ray_impact_pos = self.ctrl.orbit.position_at(ray_impact_time, ray_ref_frame)
-                # ray_aai = mun.altitude_at_position(ray_impact_pos, ray_ref_frame)
-                # ray_lat = mun.latitude_at_position(ray_impact_pos, ray_ref_frame)
-                # ray_lng = mun.longitude_at_position(ray_impact_pos, ray_ref_frame)
-
-                rel_ray_impact_pos = self.ctrl.space_center.transform_position(ray_impact_pos, ray_ref_frame, body_reference_frame)
-                rel_ray_impact_ref_frame = ReferenceFrame.create_relative(body_reference_frame, position=rel_ray_impact_pos)
-                rel_ray_vessel_pos = self.ctrl.vessel.position(rel_ray_impact_ref_frame)
-
-                if imp_line is not None:
-                    imp_line.remove()
-                imp_line = self.ctrl.connection.drawing.add_line((0, 0, 0), rel_ray_vessel_pos, rel_ray_impact_ref_frame)
-                imp_line.color = (0, 0, 1)
+            # ray_time_to_impact = get_seconds_to_impact(surf_flight_speed, ray_dist, ctrl=self.ctrl)
+            # if cnt % 20 == 0 and ray_time_to_impact != float('inf'):
+            #     ray_impact_time = self.ctrl.ut + ray_time_to_impact
+            #
+            #     # body_rot = math.pi * ray_impact_time / rotational_period
+            #     # ray_ref_frame = ReferenceFrame.create_relative(
+            #     #     body_reference_frame, rotation=(0, math.sin(body_rot), 0, math.cos(body_rot)))
+            #     ray_ref_frame = body_reference_frame
+            #
+            #     ray_impact_pos = self.ctrl.orbit.position_at(ray_impact_time, ray_ref_frame)
+            #     # ray_aai = mun.altitude_at_position(ray_impact_pos, ray_ref_frame)
+            #     # ray_lat = mun.latitude_at_position(ray_impact_pos, ray_ref_frame)
+            #     # ray_lng = mun.longitude_at_position(ray_impact_pos, ray_ref_frame)
+            #
+            #     rel_ray_impact_pos = self.ctrl.space_center.transform_position(ray_impact_pos, ray_ref_frame, body_reference_frame)
+            #     rel_ray_impact_ref_frame = ReferenceFrame.create_relative(body_reference_frame, position=rel_ray_impact_pos)
+            #     rel_ray_vessel_pos = self.ctrl.vessel.position(rel_ray_impact_ref_frame)
+            #
+            #     if imp_line is not None:
+            #         imp_line.remove()
+            #     imp_line = self.ctrl.connection.drawing.add_line((0, 0, 0), rel_ray_vessel_pos, rel_ray_impact_ref_frame)
+            #     imp_line.color = (0, 0, 1)
 
             # if ray_time_to_impact > 0:
             #     time_to_impact = ray_time_to_impact
             # else:
             #     time_to_impact = cal_time_to_impact
 
-            dist_pct_diff = ray_dist / cal_dist
-            if ray_dist != float('inf') and ray_dist > 0 and 0.5 < dist_pct_diff < 1.5:
-                dist = ray_dist
-                can_trust_ray = True
-            else:
-                dist = cal_dist
-                can_trust_ray = False
+            # dist_pct_diff = ray_dist / cal_dist
+            # if ray_dist != float('inf') and ray_dist > 0 and 0.5 < dist_pct_diff < 1.5:
+            #     dist = ray_dist
+            #     can_trust_ray = True
+            # else:
+            #     dist = cal_dist
+            #     can_trust_ray = False
             #
             # # vf = get_speed_after_time(surf_flight.speed, time_to_impact)
             # # impact_plus_1km = get_time_for_distance(surf_flight.speed, 1000)
@@ -881,8 +734,16 @@ class SuicideBurn(State):
             # suicide_burn_start_time = ut + time_to_impact - suicide_burn_time #- impact_plus_1km
             # suicide_burn_start_alt = get_suicide_burn_alt(surf_flight.speed, use_local_g=True, ctrl=self.ctrl)
 
-            suicide_burn_start_alt = get_suicide_burn_alt(surf_flight_speed, ctrl=self.ctrl)
-            suicide_burn_start_time = get_suicide_burn_time(surf_flight_speed, dist, ctrl=self.ctrl)
+
+
+            cal_time_to_impact = cal_impact_time - self.ctrl.ut
+            impact_velocity = get_speed_after_time(surf_flight_speed, cal_time_to_impact, ctrl=self.ctrl)
+
+            suicide_burn_start_distance = get_suicide_burn_distance(impact_velocity, ctrl=self.ctrl)
+            suicide_burn_start_speed = get_speed_after_distance(impact_velocity, -suicide_burn_start_distance, ctrl=self.ctrl)
+            # suicide_burn_start_radius = self.ctrl.impact_manager.calc_suicide_burn_radius(impact_velocity, cal_impact_pos_from_radius)
+            suicide_burn_start_radius = cal_impact_radius + suicide_burn_start_distance
+            suicide_burn_start_time = get_suicide_burn_time(surf_flight_speed, aprox_dist, ctrl=self.ctrl)
 
             i += 1
             cnt += 1
@@ -891,10 +752,10 @@ class SuicideBurn(State):
             if curr_second != last_second:
                 # orbit = self.ctrl.target_body.orbit
 
-                if ray_dist != float('inf') and ray_dist > 0 and 0.5 < dist_pct_diff < 1.5:
-                    pass
-                else:
-                    cal_time_to_impact, cal_dist, cal_impact_pos, cal_impact_ref_frame = find_true_impact_time(self.ctrl.vessel, ctrl=self.ctrl)
+                # if ray_dist != float('inf') and ray_dist > 0 and 0.5 < dist_pct_diff < 1.5:
+                #     pass
+                # else:
+                #     cal_time_to_impact, cal_dist, cal_impact_pos, cal_impact_ref_frame = find_true_impact_time(self.ctrl.vessel, ctrl=self.ctrl)
 
                 # we need to get the m/s at the time of the start of the suicide burn
                 # vf = get_speed_after_time(surf_flight_speed, time_to_impact, ctrl=self.ctrl)
@@ -925,15 +786,19 @@ class SuicideBurn(State):
                 # print 'ba:', suicide_burn_start_alt, 'dist:', dist
                 print 'ssp: ', surf_flight_speed
                 print 'vsp: ', surf_vertical_speed
-                print 'sad: ', get_speed_after_distance(surf_flight_speed, dist, ctrl=self.ctrl)
-                print 'rimp: ', to_min_sec_str(ray_time_to_impact if ray_time_to_impact != float('inf') else -1)
-                print 'cimp: ', to_min_sec_str(cal_time_to_impact)
+                print 'sad: ', get_speed_after_distance(surf_flight_speed, aprox_dist, ctrl=self.ctrl)
+                # print 'rimp: ', to_min_sec_str(ray_time_to_impact if ray_time_to_impact != float('inf') else -1)
+                print 'impt: ', to_min_sec_str(cal_impact_time)
+                print 'cimp: ', to_min_sec_str(cal_impact_time - self.ctrl.ut)
                 # print '1km: ', impact_plus_1km
-                print 'rdst: ', ray_dist
-                print 'cdst: ', cal_dist
-                print 'diff: ', dist_pct_diff
-                print 'sbt: ', to_min_sec_str(get_suicide_burn_time(surf_flight_speed, dist, ctrl=self.ctrl))
-                print 'alt: ', get_suicide_burn_alt(surf_flight_speed, ctrl=self.ctrl)
+                # print 'rdst: ', ray_dist
+                print 'cdst: ', aprox_dist
+                # print 'diff: ', dist_pct_diff
+                print 'impv: ', impact_velocity
+                print 'sbt: ', to_min_sec_str(suicide_burn_start_time)
+                print 'sbd: ', suicide_burn_start_distance
+                print 'sbr: ', suicide_burn_start_radius
+                print 'sbs: ', suicide_burn_start_speed
 
                 # suicide_burn_time = get_suicide_burn_time(vf, cal_dist)
                 # suicide_burn_start_time = ut + cal_time_to_impact - suicide_burn_time - impact_plus_1km
@@ -944,99 +809,107 @@ class SuicideBurn(State):
                 i = 0
                 last_second = curr_second
 
-            if dist < suicide_burn_start_alt + 15:
+            radius_diff = vessel_radius - suicide_burn_start_radius
+            if radius_diff < 500.0:
                 if not gear:
                     self.ctrl.vessel.control.gear = True
 
-                if can_trust_ray:
-                    error = (suicide_burn_start_alt + 15 - ray_dist_stream())
-                else:
-                    error = (suicide_burn_start_alt + 15 - dist)
+                # if can_trust_ray:
+                #     error = (suicide_burn_start_alt + 15 - ray_dist_stream())
+                # else:
+                # error = (suicide_burn_start_alt + 15 - aprox_dist)
+                #
+                # if 0.0 < error < 5000.0:
+                # if can_trust_ray:
+                #     print 'YES TRUST RAY'
+                #     dict_call = conn.get_call(
+                #         self.ctrl.space_center.raycast_distance,
+                #         (0, 5, 0),
+                #         (0, 1, 0),
+                #         surface_velocity_reference_frame)
+                #
+                #     suicide_burn_start_expr = conn.krpc.Expression.less_than(
+                #         conn.krpc.Expression.call(dict_call),
+                #         conn.krpc.Expression.constant_double(suicide_burn_start_alt + error))
+                #     suicide_burn_start_event = conn.krpc.add_event(suicide_burn_start_expr)
+                # else:
+                # print 'NO TRUST RAY'
+                # E = conn.krpc.Expression
+                #
+                # orbit = self.ctrl.orbit
+                # ref_frame = self.ctrl.body.reference_frame
 
-                if 0.0 < error < 5000.0:
-                    if can_trust_ray:
-                        print 'YES TRUST RAY'
-                        dict_call = conn.get_call(
-                            self.ctrl.space_center.raycast_distance,
-                            (0, 5, 0),
-                            (0, 1, 0),
-                            surface_velocity_reference_frame)
+                # ut_call = conn.get_call(getattr, self.ctrl.space_center, 'ut')
+                # e_tti = E.constant_double(cal_time_to_impact)
+                #
+                # position_arg_names = E.create_list([E.constant_string('ut'), E.constant_string('reference_frame')])
+                #
+                # vessel_pos_call = E.call(orbit.position_at, E.call(ut_call), ref_frame)
+                # vessel_pos_list = E.call(vessel_pos_call)
+                #
+                # # vessel_arg_vals = E.create_list([ut_call, ref_frame])
+                # # vessel_arg_dict = E.create_dictionary(position_arg_names, vessel_arg_vals)
+                # # vessel_pos_list = E.to_list(E.invoke(orbit.position_at, vessel_arg_dict))
+                #
+                # impact_arg_vals = E.create_list([E.sum(ut_call, e_tti), ref_frame])
+                # impact_arg_dict = E.create_dictionary(position_arg_names, impact_arg_vals)
+                # impact_pos_list = E.to_list(E.invoke(orbit.position_at, impact_arg_dict))
+                #
+                # v_x = E.get(vessel_pos_list, E.constant_double(0))
+                # v_y = E.get(vessel_pos_list, E.constant_double(1))
+                # v_z = E.get(vessel_pos_list, E.constant_double(2))
+                #
+                # i_x = E.get(impact_pos_list, E.constant_double(0))
+                # i_y = E.get(impact_pos_list, E.constant_double(1))
+                # i_z = E.get(impact_pos_list, E.constant_double(2))
+                #
+                # p_x = E.power(E.subtract(v_x, i_x), E.constant_double(2))
+                # p_y = E.power(E.subtract(v_y, i_y), E.constant_double(2))
+                # p_z = E.power(E.subtract(v_z, i_z), E.constant_double(2))
+                #
+                # p_list = E.create_list(p_x, p_y, p_z)
+                # p_sum = E.sum(p_list)
+                # dist_pow_2 = E.power(E.constant_double(dist), E.constant_double(2))
+                #
+                # E.less_than(p_sum, dist_pow_2)
+                #
+                # suicide_burn_start_expr = E.less_than(p_sum, dist_pow_2)
+                # suicide_burn_start_event = conn.krpc.add_event(suicide_burn_start_expr)
 
-                        suicide_burn_start_expr = conn.krpc.Expression.less_than(
-                            conn.krpc.Expression.call(dict_call),
-                            conn.krpc.Expression.constant_double(suicide_burn_start_alt + error))
-                        suicide_burn_start_event = conn.krpc.add_event(suicide_burn_start_expr)
-                    else:
-                        print 'NO TRUST RAY'
-                        E = conn.krpc.Expression
+                print 'building condition for landing'
+                orbit_radius_call = conn.get_call(getattr, self.ctrl.orbit, 'radius')
+                suicide_burn_start_expr = conn.krpc.Expression.less_than(
+                    conn.krpc.Expression.call(orbit_radius_call),
+                    conn.krpc.Expression.constant_double(suicide_burn_start_radius))
+                suicide_burn_start_event = conn.krpc.add_event(suicide_burn_start_expr)
 
-                        orbit = self.ctrl.orbit
-                        ref_frame = self.ctrl.body.reference_frame
+                with suicide_burn_start_event.condition:
+                    print 'waiting: {} {}'.format(vessel_radius, suicide_burn_start_radius)
+                    suicide_burn_start_event.wait()
+                    self.ctrl.vessel.control.throttle = 1.0
 
-                        ut_call = conn.get_call(getattr, self.ctrl.space_center, 'ut')
-                        e_tti = E.constant_double(cal_time_to_impact)
+                with suicide_burn_stop_event.condition:
+                    suicide_burn_stop_event.wait(suicide_burn_start_time + 2)
+                    # self.ctrl.vessel.control.throttle = 0.0
+                    self.ctrl.pitch_follow = PitchManager.FIXED_UP
+                    self.ctrl.vessel.control.throttle = 0.80 / self.ctrl.get_avail_twr()
 
-                        position_arg_names = E.create_list([E.constant_string('ut'), E.constant_string('reference_frame')])
+                    while True:
+                        print 'sit: ', self.ctrl.vessel.situation
+                        if self.ctrl.vessel.situation == self.ctrl.space_center.VesselSituation.landed:
+                            break
+                        sleep(0.5)
+                    # self.ctrl.vessel.control.throttle = 0.50 / self.ctrl.get_avail_twr()
+                    # print 'pre landed'
+                    # while True:
+                    #     for part in legs:
+                    #         if part.leg.is_grounded:
+                    #             break
+                    #     sleep(0.05)
 
-                        vessel_pos_call = E.call(orbit.position_at, E.call(ut_call), ref_frame)
-                        vessel_pos_list = E.call(vessel_pos_call)
-
-                        # vessel_arg_vals = E.create_list([ut_call, ref_frame])
-                        # vessel_arg_dict = E.create_dictionary(position_arg_names, vessel_arg_vals)
-                        # vessel_pos_list = E.to_list(E.invoke(orbit.position_at, vessel_arg_dict))
-
-                        impact_arg_vals = E.create_list([E.sum(ut_call, e_tti), ref_frame])
-                        impact_arg_dict = E.create_dictionary(position_arg_names, impact_arg_vals)
-                        impact_pos_list = E.to_list(E.invoke(orbit.position_at, impact_arg_dict))
-
-                        v_x = E.get(vessel_pos_list, E.constant_double(0))
-                        v_y = E.get(vessel_pos_list, E.constant_double(1))
-                        v_z = E.get(vessel_pos_list, E.constant_double(2))
-
-                        i_x = E.get(impact_pos_list, E.constant_double(0))
-                        i_y = E.get(impact_pos_list, E.constant_double(1))
-                        i_z = E.get(impact_pos_list, E.constant_double(2))
-
-                        p_x = E.power(E.subtract(v_x, i_x), E.constant_double(2))
-                        p_y = E.power(E.subtract(v_y, i_y), E.constant_double(2))
-                        p_z = E.power(E.subtract(v_z, i_z), E.constant_double(2))
-
-                        p_list = E.create_list(p_x, p_y, p_z)
-                        p_sum = E.sum(p_list)
-                        dist_pow_2 = E.power(E.constant_double(dist), E.constant_double(2))
-
-                        E.less_than(p_sum, dist_pow_2)
-
-                        suicide_burn_start_expr = E.less_than(p_sum, dist_pow_2)
-                        suicide_burn_start_event = conn.krpc.add_event(suicide_burn_start_expr)
-
-                    with suicide_burn_start_event.condition:
-                        print 'waiting: {} {} {} {}'.format(ray_dist_stream(), dist, suicide_burn_start_alt, error)
-                        suicide_burn_start_event.wait()
-                        self.ctrl.vessel.control.throttle = 1.0
-
-                    with suicide_burn_stop_event.condition:
-                        suicide_burn_stop_event.wait(suicide_burn_start_time + 2)
-                        # self.ctrl.vessel.control.throttle = 0.0
-                        self.ctrl.pitch_follow = PitchManager.FIXED_UP
-                        self.ctrl.vessel.control.throttle = 0.80 / self.ctrl.get_avail_twr()
-
-                        while True:
-                            print 'sit: ', self.ctrl.vessel.situation
-                            if self.ctrl.vessel.situation == self.ctrl.space_center.VesselSituation.landed:
-                                break
-                            sleep(0.5)
-                        # self.ctrl.vessel.control.throttle = 0.50 / self.ctrl.get_avail_twr()
-                        # print 'pre landed'
-                        # while True:
-                        #     for part in legs:
-                        #         if part.leg.is_grounded:
-                        #             break
-                        #     sleep(0.05)
-
-                        print 'landed'
-                        self.ctrl.vessel.control.throttle = 0.0
-                        break
+                    print 'landed'
+                    self.ctrl.vessel.control.throttle = 0.0
+                    break
 
                 # if dist < suicide_burn_start_alt:
                 #     if surf_vertical_speed < -5.0:
