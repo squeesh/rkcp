@@ -194,7 +194,7 @@ def get_pitch_heading(unit_vector):
 #     return math.sqrt(mu / r_ap) - math.sqrt((r_pe * mu) / (r_ap * (r_pe + r_ap) / 2.0))
 
 
-def get_burn_time_for_dv(dv, ctrl=None):
+def get_burn_time_for_dv(dv, g=None, ctrl=None):
     if not ctrl:
         from controller import Controller
         ctrl = Controller.get()
@@ -202,7 +202,8 @@ def get_burn_time_for_dv(dv, ctrl=None):
     m_i = ctrl.mass
     isp = ctrl.specific_impulse
     f = ctrl.available_thrust
-    g = ctrl.surface_gravity
+    g = ctrl.surface_gravity if g is None else g
+    # g = 9.8 # constant, not surface_grav
 
     if isp > 0.0:
         m_f = m_i / math.exp(dv / (isp * g))
@@ -231,31 +232,31 @@ def engine_is_active(part):
     return active
 
 
-def get_seconds_to_impact(vi, dst, ctrl=None):
+def get_seconds_to_impact(vi, dist, g=None, ctrl=None):
     if not ctrl:
         from controller import Controller
         ctrl = Controller.get()
 
-    g = ctrl.surface_gravity
-    v = math.sqrt(vi**2 + 2*g*dst)
+    g = ctrl.surface_gravity if g is None else g
+    v = math.sqrt(vi**2 + 2*g*dist)
 
     return (v-vi) / g
 
 
-def get_speed_after_time(vi, t, ctrl=None):
+def get_speed_after_time(vi, t, g=None, ctrl=None):
     if not ctrl:
         from controller import Controller
         ctrl = Controller.get()
-    g = ctrl.surface_gravity
+    g = ctrl.surface_gravity if g is None else g
     return vi + g * t
 
 
-def get_speed_after_distance(vi, dst, ctrl=None):
+def get_speed_after_distance(vi, dist, g=None, ctrl=None):
     if not ctrl:
         from controller import Controller
         ctrl = Controller.get()
-    g = ctrl.surface_gravity
-    return math.sqrt(vi**2 + 2*g*dst)
+    g = ctrl.surface_gravity if g is None else g
+    return math.sqrt(vi**2 + 2*g*dist)
 
 
 def find_true_impact_time(vessel, ctrl=None):
@@ -333,7 +334,7 @@ def find_true_impact_time(vessel, ctrl=None):
     return probe_time, math.sqrt((x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2), probe_pos, futr_ref_frame
 
 
-def get_suicide_burn_time(vi, dist, use_local_g=False, ctrl=None):
+def get_suicide_burn_time(vi, dist, g=None, ctrl=None):
     if not ctrl:
         from controller import Controller
         ctrl = Controller.get()
@@ -341,14 +342,14 @@ def get_suicide_burn_time(vi, dist, use_local_g=False, ctrl=None):
     mi = ctrl.vessel.mass
     isp = ctrl.vessel.specific_impulse
 
-    if use_local_g:
-        r = ctrl.vessel.orbit.radius
-        M = ctrl.body.mass
-        G = ctrl.space_center.g
-
-        g = (G * (M+mi) / r**2)
-    else:
-        g = ctrl.body.surface_gravity
+    # if use_local_g:
+    #     r = ctrl.vessel.orbit.radius
+    #     M = ctrl.body.mass
+    #     G = ctrl.space_center.g
+    #
+    #     g = (G * (M+mi) / r**2)
+    # else:
+    g = ctrl.body.surface_gravity if g is None else g
     thrust = ctrl.available_thrust
 
     bottom = (thrust/(g*isp))
@@ -357,21 +358,21 @@ def get_suicide_burn_time(vi, dist, use_local_g=False, ctrl=None):
     return top / bottom
 
 
-def get_suicide_burn_distance(vi, use_local_g=False, ctrl=None):
+def get_suicide_burn_distance(vi, g=None, ctrl=None):
     if not ctrl:
         from controller import Controller
         ctrl = Controller.get()
 
     mi = ctrl.mass
 
-    if use_local_g:
-        r = ctrl.radius
-        M = ctrl.body_mass
-        G = ctrl.G
-
-        g = (G * (M+mi) / r**2)
-    else:
-        g = ctrl.surface_gravity
+    # if use_local_g:
+    #     r = ctrl.radius
+    #     M = ctrl.body_mass
+    #     G = ctrl.G
+    #
+    #     g = (G * (M+mi) / r**2)
+    # else:
+    g = ctrl.surface_gravity if g is None else g
     thrust = ctrl.available_thrust #* 0.7
     # print 't:', thrust, 'm:', vessel.mass, 't/m:', thrust/vessel.mass, 'm/t:', vessel.mass/thrust
 

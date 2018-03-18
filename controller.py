@@ -12,7 +12,7 @@ from sympy import Ellipse, Circle, Point
 
 from util import SingletonMixin, get_current_stage, get_current_decouple_stage, get_vessel_pitch_heading, engine_is_active, get_pitch_heading
 from state import PreLaunch, AscentState, CoastToApoapsis, InOrbit, CoastToInterceptBurn, SurfaceHover, TransitionToHover, \
-    EnrouteToTarget, Descent, SuicideBurn
+    EnrouteToTarget, Descent, SuicideBurn, ChangeSOI
 from manager import StagingManager, PitchManager, ThrottleManager, BurnManager, EventManager, ImpactManager
 
 
@@ -43,41 +43,46 @@ class Controller(SingletonMixin, object):
         self._streams_open = 0
 
         stream_funcs = (
-            ('surface_altitude', (getattr, self.vessel.flight(), 'surface_altitude')),
-            ('vertical_speed', (getattr, self.vessel.flight(self.body.reference_frame), 'vertical_speed')),
-            ('velocity_direction', (
+            ('surface_altitude', lambda: (getattr, self.vessel.flight(), 'surface_altitude')),
+            ('vertical_speed', lambda: (getattr, self.vessel.flight(self.body.reference_frame), 'vertical_speed')),
+            ('velocity_direction', lambda: (
                 self.space_center.transform_direction,
                 (0, 1, 0),
                 self.vessel.surface_velocity_reference_frame,
                 self.vessel.surface_reference_frame)
              ),
-            ('mach', (getattr, self.vessel.flight(), 'mach')),
-            ('pitch', (getattr, self.vessel.flight(), 'pitch')),
-            ('angle_of_attack', (getattr, self.vessel.flight(), 'angle_of_attack')),
-            ('mass', (getattr, self.vessel, 'mass')),
-            ('specific_impulse', (getattr, self.vessel, 'specific_impulse')),
-            ('available_thrust', (getattr, self.vessel, 'available_thrust')),
-            ('thrust', (getattr, self.vessel, 'thrust')),
+            ('mach', lambda: (getattr, self.vessel.flight(), 'mach')),
+            ('pitch', lambda: (getattr, self.vessel.flight(), 'pitch')),
+            ('angle_of_attack', lambda: (getattr, self.vessel.flight(), 'angle_of_attack')),
+            ('mass', lambda: (getattr, self.vessel, 'mass')),
+            ('specific_impulse', lambda: (getattr, self.vessel, 'specific_impulse')),
+            ('available_thrust', lambda: (getattr, self.vessel, 'available_thrust')),
+            ('thrust', lambda: (getattr, self.vessel, 'thrust')),
 
-            ('time_to_apoapsis', (getattr, self.orbit, 'time_to_apoapsis')),
-            ('apoapsis_altitude', (getattr, self.orbit, 'apoapsis_altitude')),
-            ('periapsis_altitude', (getattr, self.orbit, 'periapsis_altitude')),
-            ('apoapsis', (getattr, self.orbit, 'apoapsis')),
-            ('periapsis', (getattr, self.orbit, 'periapsis')),
-            ('radius', (getattr, self.orbit, 'radius')),
-            ('eccentricity', (getattr, self.orbit, 'eccentricity')),
-            ('semi_major_axis', (getattr, self.orbit, 'semi_major_axis')),
-            ('semi_minor_axis', (getattr, self.orbit, 'semi_minor_axis')),
-            ('true_anomaly', (getattr, self.orbit, 'true_anomaly')),
-            ('mean_anomaly', (getattr, self.orbit, 'mean_anomaly')),
-            ('eccentric_anomaly', (getattr, self.orbit, 'eccentric_anomaly')),
-            ('longitude_of_ascending_node', (getattr, self.orbit, 'longitude_of_ascending_node')),
-            ('argument_of_periapsis', (getattr, self.orbit, 'argument_of_periapsis')),
+            ('time_to_apoapsis', lambda: (getattr, self.orbit, 'time_to_apoapsis')),
+            ('apoapsis_altitude', lambda: (getattr, self.orbit, 'apoapsis_altitude')),
+            ('periapsis_altitude', lambda: (getattr, self.orbit, 'periapsis_altitude')),
+            ('apoapsis', lambda: (getattr, self.orbit, 'apoapsis')),
+            ('periapsis', lambda: (getattr, self.orbit, 'periapsis')),
+            ('radius', lambda: (getattr, self.orbit, 'radius')),
+            ('eccentricity', lambda: (getattr, self.orbit, 'eccentricity')),
+            ('semi_major_axis', lambda: (getattr, self.orbit, 'semi_major_axis')),
+            ('semi_minor_axis', lambda: (getattr, self.orbit, 'semi_minor_axis')),
+            ('true_anomaly', lambda: (getattr, self.orbit, 'true_anomaly')),
+            ('mean_anomaly', lambda: (getattr, self.orbit, 'mean_anomaly')),
+            ('mean_anomaly_at_epoch', lambda: (getattr, self.orbit, 'mean_anomaly_at_epoch')),
+            ('epoch', lambda: (getattr, self.orbit, 'epoch')),
+            ('eccentric_anomaly', lambda: (getattr, self.orbit, 'eccentric_anomaly')),
+            ('longitude_of_ascending_node', lambda: (getattr, self.orbit, 'longitude_of_ascending_node')),
+            ('argument_of_periapsis', lambda: (getattr, self.orbit, 'argument_of_periapsis')),
+            ('time_to_periapsis', lambda: (getattr, self.orbit, 'time_to_periapsis')),
+            ('time_to_apoapsis', lambda: (getattr, self.orbit, 'time_to_apoapsis')),
+            ('period', lambda: (getattr, self.orbit, 'period')),
 
-            ('surface_gravity', (getattr, self.body, 'surface_gravity')),
-            ('equatorial_radius', (getattr, self.body, 'equatorial_radius')),
-            ('body_mass', (getattr, self.body, 'mass')),
-            ('rotational_period', (getattr, self.body, 'rotational_period')),
+            ('surface_gravity', lambda: (getattr, self.body, 'surface_gravity')),
+            ('equatorial_radius', lambda: (getattr, self.body, 'equatorial_radius')),
+            ('body_mass', lambda: (getattr, self.body, 'mass')),
+            ('rotational_period', lambda: (getattr, self.body, 'rotational_period')),
         )
 
         self.G = self.space_center.g
@@ -89,12 +94,12 @@ class Controller(SingletonMixin, object):
                 with self._stream_locks[name]:
                     if self._stream_dict.get(name, None) is None:
                         print 'opening stream: {}'.format(name)
-                        self._stream_dict[name] = self.connection.add_stream(*stream_args)
+                        self._stream_dict[name] = self.connection.add_stream(*stream_args())
                         self._streams_open += 1
             try:
                 return self._stream_dict[name]()
             except StreamError:
-                return 0.0
+                return 0.001
 
         self._stream_dict = {}
         for name, stream_args in stream_funcs:
@@ -178,7 +183,7 @@ class Controller(SingletonMixin, object):
         self.pitch_manager = PitchManager()
         self.throttle_manager = ThrottleManager()
         self.burn_manager = BurnManager()
-        self.impact_manager = ImpactManager()
+        self.impact_manager = None#ImpactManager()
 
         self.state_condition = Condition()
 
@@ -200,17 +205,19 @@ class Controller(SingletonMixin, object):
         # print self.connection.krpc.paused
         # self.connection.krpc.paused = True
 
-        # if self.vessel.situation == self.space_center.VesselSituation.pre_launch:
-        #     self._NextStateCls = PreLaunch
-        # elif self.vessel.situation == self.space_center.VesselSituation.landed:
-        #     self._NextStateCls = PreLaunch
-        # elif self.vessel.situation == self.space_center.VesselSituation.orbiting:
-        #     self._NextStateCls = CoastToInterceptBurn
-        # else:
-        #     self._NextStateCls = AscentState
+        if self.vessel.situation == self.space_center.VesselSituation.pre_launch:
+            self._NextStateCls = PreLaunch
+        elif self.vessel.situation == self.space_center.VesselSituation.landed:
+            self._NextStateCls = PreLaunch
+        elif self.vessel.situation == self.space_center.VesselSituation.orbiting:
+            self._NextStateCls = CoastToInterceptBurn
+        else:
+            self._NextStateCls = AscentState
 
+        # self._NextStateCls = EnrouteToTarget
+        # self._NextStateCls = ChangeSOI
         # self._NextStateCls = Descent
-        self._NextStateCls = SuicideBurn
+        # self._NextStateCls = SuicideBurn
         # self._NextStateCls = TransitionToHover
         # self._NextStateCls = EnrouteToTarget
 
@@ -262,9 +269,9 @@ class Controller(SingletonMixin, object):
         _, velocity_heading = get_pitch_heading(self.velocity_direction)
         return velocity_heading
 
-    @property
-    def mach(self):
-        return self._mach()
+    # @property
+    # def mach(self):
+    #     return self._mach()
 
     # @property
     # def angle_of_attack(self):
@@ -387,6 +394,12 @@ class Controller(SingletonMixin, object):
         return self._impact_points
 
     def get_NextStateCls(self):
+        for name in self._stream_dict:
+            if self._stream_dict[name] is not None:
+                print 'closing stream: ', name
+                self._stream_dict[name].remove()
+                self._stream_dict[name] = None
+        self._streams_open = 0
         return self._NextStateCls
 
     def set_NextStateCls(self, NextStateCls):

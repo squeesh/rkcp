@@ -70,6 +70,7 @@ class PreLaunch(State):
 
 class AscentState(State):
     ALTITUDE_TURN_START = 100
+    # ALTITUDE_TARGET = 250000
     ALTITUDE_TARGET = 175000
     # ALTITUDE_TARGET = 100000
     # ALTITUDE_TARGET = 2868740  # geostationary
@@ -80,7 +81,7 @@ class AscentState(State):
     LOW_TWR_BOUND = 1.05
 
     HIGH_TWR_PITCH = 72.5
-    HIGH_TWR_BOUND = 2.25
+    HIGH_TWR_BOUND = 2.5
 
     def run(self):
         self.ctrl.vessel.auto_pilot.engage()
@@ -204,7 +205,9 @@ class AscentState(State):
 
             if self.ctrl.apoapsis_altitude < self.ALTITUDE_TARGET:
                 if self.ctrl.apoapsis_altitude >= self.ALTITUDE_TARGET * 0.985:
-                    self.ctrl.set_throttle(0.05)
+                    avail_twr = self.ctrl.get_avail_twr()
+                    if avail_twr:
+                        self.ctrl.set_throttle(0.25 / avail_twr)
             else:
                 self.ctrl.set_throttle(0)
 
@@ -230,8 +233,6 @@ class AscentState(State):
                     # print 'ut:         {}'.format(self.ctrl.ut)
                     # print 'burn start: {}'.format(self.ctrl.burn_start)
                     # print 'burn time: {}'.format(self.ctrl.burn_time)
-                    self.ctrl.vessel.control.rcs = True
-                    self.ctrl.vessel.auto_pilot.stopping_time = (4.0, 4.0, 4.0)
                     self.ctrl.space_center.warp_to(self.ctrl.get_burn_start() - 20)
 
                     self.ctrl.set_NextStateCls(CoastToApoapsis)
@@ -263,13 +264,16 @@ class CoastToApoapsis(State):
         burn_stop_acquired = False
         print 'COAST'
         self.ctrl.pitch_follow = PitchManager.ORBIT_PROGRADE
-        self.ctrl.vessel.auto_pilot.engage()
-        self.ctrl.vessel.auto_pilot.target_roll = PreLaunch.TARGET_ROLL
+        # self.ctrl.vessel.auto_pilot.engage()
+        # self.ctrl.vessel.auto_pilot.target_roll = PreLaunch.TARGET_ROLL
 
         last_second = datetime.now().second
         i = 0
 
         burn_start = self.ctrl.get_burn_start()
+
+        self.ctrl.vessel.control.rcs = True
+        self.ctrl.vessel.auto_pilot.stopping_time = (4.0, 4.0, 4.0)
 
         while True:
             i += 1
@@ -473,7 +477,7 @@ class BurnToBody(State):
 
                 with self.ctrl.burn_manager.burn_end:
                     self.ctrl.burn_manager.burn_end.wait()
-                    assert self.ctrl.vessel.orbit.next_orbit is not None
+                    assert self.ctrl.orbit.next_orbit is not None
                     self.ctrl.set_NextStateCls(EnrouteToTarget)
                     break
 
@@ -561,24 +565,159 @@ class EnrouteToTarget(State):
 
                 self.ctrl.space_center.warp_to(self.ctrl.ut + self.ctrl.orbit.time_to_soi_change+5)
                 # TODO: Capture burn state
-                self.ctrl.set_NextStateCls(Descent)
+                self.ctrl.set_NextStateCls(ChangeSOI)
                 break
+
+class ChangeSOI(State):
+    def run(self):
+        self.ctrl.space_center.warp_to(self.ctrl.ut + 90)
+
+        self.ctrl.pitch_follow = PitchManager.ORBIT_RETROGRADE
+        self.ctrl.vessel.auto_pilot.engage()
+        self.ctrl.vessel.auto_pilot.wait()
+        sleep(15.0)
+
+
+        # conn = self.ctrl.connection
+        # time_to_soi_change_call = conn.get_call(getattr, self.ctrl.orbit, 'time_to_soi_change')
+        # time_to_soi_change_expr = conn.krpc.Expression.equal(
+        #     conn.krpc.Expression.call(time_to_soi_change_call),
+        #     conn.krpc.Expression.constant_double(float('nan')))
+        # time_to_soi_change_event = conn.krpc.add_event(time_to_soi_change_expr)
+        #
+        # with time_to_soi_change_event.condition:
+        #     self.ctrl.vessel.control.throttle = 1.0
+        #     time_to_soi_change_event.wait()
+        #     sleep(2.5)
+        #     self.ctrl.vessel.control.throttle = 0.5
+        #     sleep(2.5)
+        #     self.ctrl.vessel.control.throttle = 0.0
+
+        self.ctrl.vessel.control.throttle = 0.25
+        while True:
+            sleep(0.1)
+            if self.ctrl.orbit.next_orbit is None:
+                break
+
+        self.ctrl.vessel.control.throttle = 0.0
+        self.ctrl.set_NextStateCls(Descent)
 
 
 class Descent(State):
     def run(self):
-        print 'descent...'
+        # print 'descent...'
         from sympy import Ellipse, Circle, Point
         from sympy.geometry import intersection
+        from manager import ImpactManager
+        self.ctrl.impact_manager = ImpactManager()
 
-        last_second = datetime.now().second
         i = 0
+        last_second = datetime.now().second
 
         lines = []
 
         ReferenceFrame = self.ctrl.space_center.ReferenceFrame
 
         vessel_position_stream = self.ctrl.connection.add_stream(self.ctrl.vessel.position, self.ctrl.body.reference_frame)
+
+        surf_flight = self.ctrl.vessel.flight(self.ctrl.body.reference_frame)
+
+        # while True:
+        #     curr_second = datetime.now().second
+        #
+        #     if curr_second != last_second:
+        #         cal_impact_time, cal_impact_pos = self.ctrl.impact_manager.impact_time_pos()
+        #         # print 'imp tme: ', cal_impact_time
+        #         # print 'imp pos: ', cal_impact_pos
+        #         cal_impact_radius = math.sqrt(sum([val ** 2 for val in cal_impact_pos]))
+        #         # print 'imp rad: ', cal_impact_radius
+        #         cal_impact_pos_from_radius = self.ctrl.impact_manager.calc_pos(radius=cal_impact_radius)
+        #         # print 'imp blh: ', cal_impact_pos_from_radius.x, cal_impact_pos_from_radius.y
+        #         # print 'imp rad: ', cal_impact_pos_from_radius.radius
+        #         # print 'imp tra: ', cal_impact_pos_from_radius.true_anomaly
+        #         # print 'imp tha: ', cal_impact_pos_from_radius.theta
+        #
+        #         vta = self.ctrl.true_anomaly
+        #         vma = self.ctrl.mean_anomaly
+        #         vrad = self.ctrl.radius
+        #         vessel_pos = self.ctrl.impact_manager.calc_pos(true_anomaly=vta)
+        #         # vessel_radius = self.ctrl.impact_manager.calc_radius(pos=vessel_pos)
+        #         aprox_dist = self.ctrl.impact_manager.approximate_distance(pos_1=cal_impact_pos_from_radius, pos_2=vessel_pos, n=100)
+        #
+        #         cal_time_to_impact = cal_impact_time - self.ctrl.ut
+        #
+        #         # mi = self.ctrl.mass
+        #         # r = self.ctrl.radius
+        #         # M = self.ctrl.body_mass
+        #         # G = self.ctrl.G
+        #         # g = (G * (M+mi) / r**2)
+        #         g = self.ctrl.surface_gravity
+        #         # print 'little g: ', g
+        #
+        #         # use mean anomaly to approximate speeds ...
+        #
+        #         # impact_velocity = get_speed_after_time(surf_flight.speed, cal_time_to_impact, g=g, ctrl=self.ctrl)
+        #         impact_velocity = self.ctrl.impact_manager.approximate_speed(pos=cal_impact_pos_from_radius)
+        #         burn_time_to_kill_imp_vel = get_burn_time_for_dv(impact_velocity, ctrl=self.ctrl)
+        #
+        #         suicide_burn_stop_distance = get_suicide_burn_distance(impact_velocity, g=g, ctrl=self.ctrl)
+        #         suicide_burn_start_radius = cal_impact_radius + suicide_burn_stop_distance
+        #         # suicide_burn_start_velocity = get_speed_after_distance(impact_velocity, -suicide_burn_stop_distance, g=g, ctrl=self.ctrl)
+        #         suicide_burn_start_velocity = self.ctrl.impact_manager.approximate_speed(radius=suicide_burn_start_radius)
+        #         # suicide_burn_start_radius = self.ctrl.impact_manager.calc_suicide_burn_radius(impact_velocity, cal_impact_pos_from_radius)
+        #         # suicide_burn_start_radius = cal_impact_radius + suicide_burn_stop_distance
+        #         # suicide_burn_burn_duration = get_suicide_burn_time(suicide_burn_start_velocity, aprox_dist, g=g, ctrl=self.ctrl)
+        #
+        #         print
+        #         print 'tks:', i
+        #         print 'dist: ', aprox_dist
+        #         print 'tti: ', to_min_sec_str(cal_time_to_impact)
+        #         print 'ttkv: ', burn_time_to_kill_imp_vel
+        #         print 'impr: ', cal_impact_radius
+        #         print 'impv: ', impact_velocity, '<---'
+        #         print 'valt: ', self.ctrl.surface_altitude
+        #         print 'sbsd: ', suicide_burn_stop_distance
+        #         print 'sbsv: ', suicide_burn_start_velocity, '<---'
+        #         print 'sbsr: ', suicide_burn_start_radius
+        #         # print 'sbbd: ', to_min_sec_str(suicide_burn_burn_duration)
+        #
+        #         print 'spd:  {}'.format(self.ctrl.impact_manager.approximate_speed(pos=cal_impact_pos_from_radius))
+        #         # print 't0: ', math.degrees(vta)
+        #         # print 't1: ', math.degrees(self.ctrl.impact_manager.calc_true_anomaly(pos=vessel_pos))
+        #         # print 't2: ', math.degrees(self.ctrl.impact_manager.calc_true_anomaly(radius=vrad))
+        #         # # print 'm3: ', math.degrees(self.ctrl.impact_manager.calc_true_anomaly(true_anomaly=vta))
+        #         # print '---'
+        #         print 'm0: ', math.degrees(vma)
+        #         print 'm1: ', math.degrees(self.ctrl.impact_manager.calc_mean_anomaly(pos=vessel_pos))
+        #         print 'm2: ', math.degrees(self.ctrl.impact_manager.calc_mean_anomaly(radius=vrad))
+        #         print 'm3: ', math.degrees(self.ctrl.impact_manager.calc_mean_anomaly(true_anomaly=vta))
+        #         # print 'md: ', math.degrees(self.ctrl.impact_manager.calc_mean_anomaly(pos=vessel_pos)) - math.degrees(vma)
+        #         # print 'md: ', math.degrees(self.ctrl.impact_manager.calc_mean_anomaly(pos=vessel_pos)) + math.degrees(vma)
+        #         # print 'me: ', math.degrees(self.ctrl.mean_anomaly_at_epoch)
+        #         # print 'ep: ', self.ctrl.epoch
+        #         # print 'ut: ', self.ctrl.ut
+        #         #
+        #         # rots = self.ctrl.epoch / self.ctrl.rotational_period
+        #         # print 'rots: ', rots
+        #         # print 'mc: ', math.degrees(self.ctrl.mean_anomaly_at_epoch - (rots * 2*math.pi))
+        #
+        #         # print 'pos: ',  pos.x, pos.y
+        #         # if mean_anomaly is None:
+        #         #     mean_anomaly = self.calc_mean_anomaly(pos=pos, true_anomaly=true_anomaly, eccentric_anomaly=eccentric_anomaly)
+        #         # print 'mean anom v: {}'.format(mean_anomaly)
+        #         # rotational_period = self.ctrl.rotational_period
+        #         # pct = mean_anomaly / (2*math.pi)
+        #         # print 'mean anom p: {}'.format(pct)
+        #         # t = pct * rotational_period
+        #         # print self.ctrl.mean_anomaly_at_epoch
+        #         # print self.ctrl.mean_anomaly
+        #         # print 'mean anom t: {}'.format(t)
+        #         # print 'mean anom u: {}'.format(self.ctrl.ut)
+        #         # print 'mean anom e: {}'.format(self.ctrl.epoch)
+        #
+        #         i = 0
+        #         last_second = curr_second
+        #     i += 1
 
         self.ctrl.pitch_follow = PitchManager.SURFACE_RETROGRADE
         self.ctrl.vessel.auto_pilot.engage()
@@ -591,34 +730,42 @@ class Descent(State):
 
         cal_time_to_impact = cal_impact_time - self.ctrl.ut
 
-        vf = get_speed_after_time(surf_flight.speed, cal_time_to_impact, ctrl=self.ctrl)
-        vessel_pos = self.ctrl.impact_manager.calc_pos(true_anomaly=self.ctrl.true_anomaly)
-        aprox_dist = self.ctrl.impact_manager.approximate_distance(pos_1=self.ctrl.impact_manager.calc_pos(radius=cal_impact_radius), pos_2=vessel_pos, n=100)
-        suicide_burn_time = get_suicide_burn_time(vf, aprox_dist, ctrl=self.ctrl)
+        # vf = get_speed_after_time(surf_flight.speed, cal_time_to_impact, ctrl=self.ctrl)
+        # vessel_pos = self.ctrl.impact_manager.calc_pos(true_anomaly=self.ctrl.true_anomaly)
+        # aprox_dist = self.ctrl.impact_manager.approximate_distance(pos_1=self.ctrl.impact_manager.calc_pos(radius=cal_impact_radius), pos_2=vessel_pos, n=100)
+        # suicide_burn_time = get_suicide_burn_time(vf, aprox_dist, ctrl=self.ctrl)
+
+        impact_velocity = self.ctrl.impact_manager.approximate_speed(radius=cal_impact_radius)
+        burn_time_to_kill_imp_vel = get_burn_time_for_dv(impact_velocity, ctrl=self.ctrl)
+
+        # suicide_burn_stop_distance = get_suicide_burn_distance(impact_velocity, g=g, ctrl=self.ctrl)
+        # suicide_burn_start_radius = cal_impact_radius + suicide_burn_stop_distance
+        # # suicide_burn_start_velocity = get_speed_after_distance(impact_velocity, -suicide_burn_stop_distance, g=g, ctrl=self.ctrl)
+        # suicide_burn_start_velocity = self.ctrl.impact_manager.approximate_speed(radius=suicide_burn_start_radius)
 
         print 'tti: ', cal_time_to_impact
-        print 'sbt: ', suicide_burn_time
+        print 'sbt: ', burn_time_to_kill_imp_vel
 
         # This will always be higher then the true burn point due to using surface gravity in our vf calc
-        self.ctrl.space_center.warp_to(cal_impact_time - (suicide_burn_time + 45))
+        self.ctrl.space_center.warp_to(cal_impact_time - (burn_time_to_kill_imp_vel + 45))
 
-        sleep(15.0)
-        # self.ctrl.vessel.auto_pilot.wait(3.0)
-
-        conn = self.ctrl.connection
-        speed_call = conn.get_call(getattr, surf_flight, 'speed')
-
-        decent_slow_expr = conn.krpc.Expression.less_than(
-            conn.krpc.Expression.call(speed_call),
-            conn.krpc.Expression.constant_double(50.0))
-
-        # Create an event from the expression
-        descent_slow_event = conn.krpc.add_event(decent_slow_expr)
-
-        with descent_slow_event.condition:
-            self.ctrl.set_throttle(1.0)
-            descent_slow_event.wait()
-            self.ctrl.set_throttle(0.0)
+        sleep(5.0)
+        # # self.ctrl.vessel.auto_pilot.wait(3.0)
+        #
+        # conn = self.ctrl.connection
+        # speed_call = conn.get_call(getattr, surf_flight, 'speed')
+        #
+        # decent_slow_expr = conn.krpc.Expression.less_than(
+        #     conn.krpc.Expression.call(speed_call),
+        #     conn.krpc.Expression.constant_double(50.0))
+        #
+        # # Create an event from the expression
+        # descent_slow_event = conn.krpc.add_event(decent_slow_expr)
+        #
+        # with descent_slow_event.condition:
+        #     self.ctrl.set_throttle(1.0)
+        #     descent_slow_event.wait()
+        #     self.ctrl.set_throttle(0.0)
 
         self.ctrl.set_NextStateCls(SuicideBurn)
 
@@ -636,7 +783,7 @@ class SuicideBurn(State):
 
         self.ctrl.pitch_follow = PitchManager.SURFACE_RETROGRADE
         self.ctrl.vessel.auto_pilot.engage()
-        self.ctrl.vessel.auto_pilot.target_roll = 0
+        self.ctrl.vessel.auto_pilot.target_roll = float('nan')
         # self.ctrl.vessel.auto_pilot.stopping_time = (0.15, 0.15, 0.15)
 
         # cal_time_to_impact, cal_dist, cal_impact_pos, cal_impact_ref_frame = self.ctrl.impact_manager.impact_time_pos()
@@ -665,27 +812,30 @@ class SuicideBurn(State):
 
         conn = self.ctrl.connection
 
-        surf_vertical_speed_call = conn.get_call(getattr, surf_flight, 'vertical_speed')
-        suicide_burn_stop_expr = conn.krpc.Expression.greater_than(
-            conn.krpc.Expression.call(surf_vertical_speed_call),
-            conn.krpc.Expression.constant_double(-2.0))
+        surf_speed_call = conn.get_call(getattr, surf_flight, 'speed')
+        suicide_burn_stop_expr = conn.krpc.Expression.less_than(
+            conn.krpc.Expression.call(surf_speed_call),
+            conn.krpc.Expression.constant_double(5.0))
         suicide_burn_stop_event = conn.krpc.add_event(suicide_burn_stop_expr)
 
         # legs = self.ctrl.get_parts_of_type('leg')
         # can_trust_ray = False
 
         while True:
-            # ray_dist = ray_dist_stream()
-            surf_flight_speed = surf_speed_stream()
-            surf_vertical_speed = surf_vertical_speed_stream()
+            # # ray_dist = ray_dist_stream()
+            # surf_flight_speed = surf_speed_stream()
+            # surf_vertical_speed = surf_vertical_speed_stream()
 
             cal_impact_time, cal_impact_pos = self.ctrl.impact_manager.impact_time_pos()
-            cal_impact_radius = math.sqrt(sum([val ** 2 for val in cal_impact_pos]))
-            cal_impact_pos_from_radius = self.ctrl.impact_manager.calc_pos(radius=cal_impact_radius)
+            # cal_impact_radius = math.sqrt(sum([val ** 2 for val in cal_impact_pos]))
+            cal_impact_mean_anomaly = self.ctrl.orbit.mean_anomaly_at_ut(cal_impact_time)
+            # cal_impact_mean_anomaly = self.ctrl.impact_manager.calc_mean_anomaly(radius=cal_impact_radius)
+            # cal_impact_pos_from_radius = self.ctrl.impact_manager.calc_pos(radius=cal_impact_radius)
+            cal_impact_pos_from_time = self.ctrl.impact_manager.calc_pos(mean_anomaly=cal_impact_mean_anomaly)
 
             vessel_pos = self.ctrl.impact_manager.calc_pos(true_anomaly=self.ctrl.true_anomaly)
-            vessel_radius = self.ctrl.impact_manager.calc_radius(pos=vessel_pos)
-            aprox_dist = self.ctrl.impact_manager.approximate_distance(pos_1=cal_impact_pos_from_radius, pos_2=vessel_pos, n=100)
+            # vessel_radius = self.ctrl.impact_manager.calc_radius(pos=vessel_pos)
+            aprox_dist = self.ctrl.impact_manager.approximate_distance(pos_1=cal_impact_pos_from_time, pos_2=vessel_pos, n=100)
 
             # ray_time_to_impact = get_seconds_to_impact(surf_flight_speed, ray_dist, ctrl=self.ctrl)
             # if cnt % 20 == 0 and ray_time_to_impact != float('inf'):
@@ -734,16 +884,43 @@ class SuicideBurn(State):
             # suicide_burn_start_time = ut + time_to_impact - suicide_burn_time #- impact_plus_1km
             # suicide_burn_start_alt = get_suicide_burn_alt(surf_flight.speed, use_local_g=True, ctrl=self.ctrl)
 
+            # cal_time_to_impact = cal_impact_time - self.ctrl.ut
+            # impact_velocity = get_speed_after_time(surf_flight_speed, cal_time_to_impact, ctrl=self.ctrl)
+            #
+            # suicide_burn_start_distance = get_suicide_burn_distance(impact_velocity, ctrl=self.ctrl)
+            # suicide_burn_start_speed = get_speed_after_distance(impact_velocity, -suicide_burn_start_distance, ctrl=self.ctrl)
+            # # suicide_burn_start_radius = self.ctrl.impact_manager.calc_suicide_burn_radius(impact_velocity, cal_impact_pos_from_radius)
+            # suicide_burn_start_radius = cal_impact_radius + suicide_burn_start_distance
+            # suicide_burn_start_time = get_suicide_burn_time(surf_flight_speed, aprox_dist, ctrl=self.ctrl)
 
 
-            cal_time_to_impact = cal_impact_time - self.ctrl.ut
-            impact_velocity = get_speed_after_time(surf_flight_speed, cal_time_to_impact, ctrl=self.ctrl)
+            # *****
+            mi = self.ctrl.mass
+            r = self.ctrl.radius
+            M = self.ctrl.body_mass
+            G = self.ctrl.G
+            g = (G * (M+mi) / r**2)
+            # g = None
 
-            suicide_burn_start_distance = get_suicide_burn_distance(impact_velocity, ctrl=self.ctrl)
-            suicide_burn_start_speed = get_speed_after_distance(impact_velocity, -suicide_burn_start_distance, ctrl=self.ctrl)
+            # impact_velocity = get_speed_after_time(surf_flight.speed, cal_time_to_impact, g=g, ctrl=self.ctrl)
+            impact_velocity = self.ctrl.impact_manager.approximate_speed(pos=cal_impact_pos_from_time)
+            burn_time_to_kill_imp_vel = get_burn_time_for_dv(impact_velocity, g=g, ctrl=self.ctrl)
+
+            suicide_burn_stop_distance = get_suicide_burn_distance(impact_velocity, g=g, ctrl=self.ctrl)
+            # suicide_burn_start_radius = cal_impact_radius + suicide_burn_stop_distance
+            # suicide_burn_start_velocity = get_speed_after_distance(impact_velocity, -suicide_burn_stop_distance, g=g, ctrl=self.ctrl)
+
+            burn_time_to_stop = self.ctrl.impact_manager.calc_time_for_speed_dist(impact_velocity, 0, suicide_burn_stop_distance)
+            offset = 0 #burn_time_to_kill_imp_vel * 0.1
+            burn_start_mean_anomaly = self.ctrl.impact_manager.calc_mean_anomaly(pos=cal_impact_pos_from_time, time_offset=-burn_time_to_kill_imp_vel+offset)
+            burn_start_mean_anomaly_minus_10 = self.ctrl.impact_manager.calc_mean_anomaly(pos=cal_impact_pos_from_time, time_offset=-burn_time_to_kill_imp_vel-10+offset)
+
+            suicide_burn_start_velocity = self.ctrl.impact_manager.approximate_speed(mean_anomaly=burn_start_mean_anomaly)
+
             # suicide_burn_start_radius = self.ctrl.impact_manager.calc_suicide_burn_radius(impact_velocity, cal_impact_pos_from_radius)
-            suicide_burn_start_radius = cal_impact_radius + suicide_burn_start_distance
-            suicide_burn_start_time = get_suicide_burn_time(surf_flight_speed, aprox_dist, ctrl=self.ctrl)
+            # suicide_burn_start_radius = cal_impact_radius + suicide_burn_stop_distance
+            # suicide_burn_burn_duration = get_suicide_burn_time(suicide_burn_start_velocity, aprox_dist, g=g, ctrl=self.ctrl)
+            # *****
 
             i += 1
             cnt += 1
@@ -762,43 +939,57 @@ class SuicideBurn(State):
                 # impact_plus_1km = get_time_for_distance(vf, 1000)
                 # use that speed to make the suicide burn happen 100m higher
 
-                mi = self.ctrl.mass
-                r = self.ctrl.radius
-                M = self.ctrl.body_mass
-                G = self.ctrl.G
-
-                g = (G * (M + mi) / r ** 2)
-                thrust = self.ctrl.available_thrust
-                accel = thrust / mi - g
+                # mi = self.ctrl.mass
+                # r = self.ctrl.radius
+                # M = self.ctrl.body_mass
+                # G = self.ctrl.G
+                #
+                # g = (G * (M + mi) / r ** 2)
+                # thrust = self.ctrl.available_thrust
+                # accel = thrust / mi - g
 
                 print
                 print 'tks:', i
-                print 'mi:', mi
-                print 'r: ', r
-                print 'M: ', M
-                print 'G: ', G
-                print 'g: ', g
-                print 't: ', thrust
-                print 'accl: ', accel
+                # print 'mi:', mi
+                # print 'r: ', r
+                # print 'M: ', M
+                # print 'G: ', G
+                # print 'g: ', g
+                # print 't: ', thrust
+                # print 'accl: ', accel
                 # print 'sp:', surf_flight.speed
                 # print 'bt:', suicide_burn_time
                 # print 'ut:', ut, 'bs:', suicide_burn_start_time
                 # print 'ba:', suicide_burn_start_alt, 'dist:', dist
-                print 'ssp: ', surf_flight_speed
-                print 'vsp: ', surf_vertical_speed
-                print 'sad: ', get_speed_after_distance(surf_flight_speed, aprox_dist, ctrl=self.ctrl)
+                # print 'ssp: ', surf_flight_speed
+                # print 'vsp: ', surf_vertical_speed
+                # print 'sad: ', get_speed_after_distance(surf_flight_speed, aprox_dist, ctrl=self.ctrl)
                 # print 'rimp: ', to_min_sec_str(ray_time_to_impact if ray_time_to_impact != float('inf') else -1)
-                print 'impt: ', to_min_sec_str(cal_impact_time)
+                # print 'impt: ', to_min_sec_str(cal_impact_time)
                 print 'cimp: ', to_min_sec_str(cal_impact_time - self.ctrl.ut)
+                # print 'time: ', self.ctrl.impact_manager.calc_time(mean_anomaly=cal_impact_mean_anomaly) - self.ctrl.ut
+                print 'time: ', to_min_sec_str(self.ctrl.impact_manager.calc_time(mean_anomaly=cal_impact_mean_anomaly) - self.ctrl.ut)
+                print 'bs_1: ', to_min_sec_str(self.ctrl.impact_manager.calc_time(mean_anomaly=burn_start_mean_anomaly) - self.ctrl.ut)
+                print 'bs10: ', to_min_sec_str(self.ctrl.impact_manager.calc_time(mean_anomaly=burn_start_mean_anomaly_minus_10) - self.ctrl.ut)
                 # print '1km: ', impact_plus_1km
                 # print 'rdst: ', ray_dist
                 print 'cdst: ', aprox_dist
+                print 'sbsd: ', suicide_burn_stop_distance
+                print 'btki: ', burn_time_to_kill_imp_vel
+                print 'btts: ', burn_time_to_stop
                 # print 'diff: ', dist_pct_diff
                 print 'impv: ', impact_velocity
-                print 'sbt: ', to_min_sec_str(suicide_burn_start_time)
-                print 'sbd: ', suicide_burn_start_distance
-                print 'sbr: ', suicide_burn_start_radius
-                print 'sbs: ', suicide_burn_start_speed
+                print 'srtv: ', suicide_burn_start_velocity
+                print 'vspd:', self.ctrl.vertical_speed
+                # print 'vsma: ', self.ctrl.mean_anomaly
+                # print 'bsma: ', burn_start_mean_anomaly
+                # print 'ipma: ', cal_impact_mean_anomaly
+                # # print 'ialt: ', self.ctrl.orbit.alti(cal_impact_time)
+                # print 'irad: ', self.ctrl.impact_manager.calc_radius(mean_anomaly=cal_impact_mean_anomaly)
+                # print 'sbt: ', to_min_sec_str(suicide_burn_start_time)
+                # print 'sbd: ', suicide_burn_start_distance
+                # print 'sbr: ', suicide_burn_start_radius
+                # print 'sbs: ', suicide_burn_start_speed
 
                 # suicide_burn_time = get_suicide_burn_time(vf, cal_dist)
                 # suicide_burn_start_time = ut + cal_time_to_impact - suicide_burn_time - impact_plus_1km
@@ -806,11 +997,15 @@ class SuicideBurn(State):
 
                 # set_state(SUICIDE_BURN)
 
+                # # body_impact_pos = self.ctrl.space_center.transform_position(cal_impact_pos, ray_ref_frame, body_reference_frame)
+                # body_vessel_pos = self.ctrl.space_center.transform_position((0, 0, 0), self.ctrl.vessel.reference_frame, self.ctrl.body.reference_frame)
+                # imp_line = self.ctrl.connection.drawing.add_line(body_vessel_pos, cal_impact_pos, self.ctrl.body.reference_frame)
+                # imp_line.color = (0, 0, 1)
+
                 i = 0
                 last_second = curr_second
 
-            radius_diff = vessel_radius - suicide_burn_start_radius
-            if radius_diff < 500.0:
+            if self.ctrl.mean_anomaly > burn_start_mean_anomaly_minus_10:
                 if not gear:
                     self.ctrl.vessel.control.gear = True
 
@@ -876,40 +1071,75 @@ class SuicideBurn(State):
                 # suicide_burn_start_expr = E.less_than(p_sum, dist_pow_2)
                 # suicide_burn_start_event = conn.krpc.add_event(suicide_burn_start_expr)
 
+                # This will need to change for direction of travel i believe? depends on how mean anomaly is reported
                 print 'building condition for landing'
-                orbit_radius_call = conn.get_call(getattr, self.ctrl.orbit, 'radius')
-                suicide_burn_start_expr = conn.krpc.Expression.less_than(
-                    conn.krpc.Expression.call(orbit_radius_call),
-                    conn.krpc.Expression.constant_double(suicide_burn_start_radius))
+                orbit_mean_anomaly_call = conn.get_call(getattr, self.ctrl.orbit, 'mean_anomaly')
+                suicide_burn_start_expr = conn.krpc.Expression.greater_than(
+                    conn.krpc.Expression.call(orbit_mean_anomaly_call),
+                    conn.krpc.Expression.constant_double(burn_start_mean_anomaly))
                 suicide_burn_start_event = conn.krpc.add_event(suicide_burn_start_expr)
 
                 with suicide_burn_start_event.condition:
-                    print 'waiting: {} {}'.format(vessel_radius, suicide_burn_start_radius)
+                    print 'waiting: {} {}'.format(self.ctrl.mean_anomaly, burn_start_mean_anomaly)
                     suicide_burn_start_event.wait()
                     self.ctrl.vessel.control.throttle = 1.0
 
                 with suicide_burn_stop_event.condition:
-                    suicide_burn_stop_event.wait(suicide_burn_start_time + 2)
+                    suicide_burn_stop_event.wait(burn_time_to_kill_imp_vel + 5)
                     # self.ctrl.vessel.control.throttle = 0.0
-                    self.ctrl.pitch_follow = PitchManager.FIXED_UP
-                    self.ctrl.vessel.control.throttle = 0.80 / self.ctrl.get_avail_twr()
 
-                    while True:
-                        print 'sit: ', self.ctrl.vessel.situation
-                        if self.ctrl.vessel.situation == self.ctrl.space_center.VesselSituation.landed:
-                            break
-                        sleep(0.5)
-                    # self.ctrl.vessel.control.throttle = 0.50 / self.ctrl.get_avail_twr()
-                    # print 'pre landed'
-                    # while True:
-                    #     for part in legs:
-                    #         if part.leg.is_grounded:
-                    #             break
-                    #     sleep(0.05)
+                    # self.ctrl.vessel.control.throttle = 3.0 / self.ctrl.get_avail_twr()
+                    # sleep(1.0)
 
-                    print 'landed'
-                    self.ctrl.vessel.control.throttle = 0.0
-                    break
+                while True:
+                    vert_speed = self.ctrl.vertical_speed #surf_vertical_speed_stream()
+
+                    # ves_pos = self.ctrl.impact_manager.calc_pos(true_anomaly=self.ctrl.true_anomaly)
+                    # imp_pos = self.ctrl.impact_manager.calc_pos(mean_anomaly=cal_impact_mean_anomaly)
+                    # # vessel_radius = self.ctrl.impact_manager.calc_radius(pos=vessel_pos)
+                    # # aprox_dist = self.ctrl.impact_manager.approximate_distance(mean_anoamly=imp_pos, pos_2=ves_pos, n=100)
+                    # print 'dist: ', ves_pos.distance(imp_pos)
+
+                    # print 'sit: ', self.ctrl.vessel.situation, '|', vert_speed
+                    if self.ctrl.vessel.situation == self.ctrl.space_center.VesselSituation.landed:
+                        break
+
+                    if vert_speed < -10.0:
+                        self.ctrl.pitch_follow = PitchManager.SURFACE_RETROGRADE
+                        self.ctrl.vessel.control.throttle = 1.0
+                    elif self.ctrl.surface_altitude > 50.0:
+                        self.ctrl.pitch_follow = PitchManager.SURFACE_RETROGRADE
+                        if vert_speed < -5.0:
+                            self.ctrl.vessel.control.throttle = 1.0 / self.ctrl.get_avail_twr()
+                        else:
+                            self.ctrl.vessel.control.throttle = 0.35 / self.ctrl.get_avail_twr()
+                    else:
+                        if vert_speed < -5.0:
+                            self.ctrl.vessel.control.throttle = 10.0 / self.ctrl.get_avail_twr()
+                        else:
+                            self.ctrl.pitch_follow = PitchManager.FIXED_UP
+
+                            if vert_speed < -2.5:
+                                self.ctrl.vessel.control.throttle = 3.0 / self.ctrl.get_avail_twr()
+                            elif vert_speed < -1.0:
+                                self.ctrl.vessel.control.throttle = 1.0 / self.ctrl.get_avail_twr()
+                            else:
+                                self.ctrl.vessel.control.throttle = 0.75 / self.ctrl.get_avail_twr()
+
+                # self.ctrl.vessel.control.throttle = 0.50 / self.ctrl.get_avail_twr()
+                # print 'pre landed'
+                # while True:
+                #     for part in legs:
+                #         if part.leg.is_grounded:
+                #             break
+                #     sleep(0.05)
+
+                print 'landed'
+                self.ctrl.vessel.control.throttle = 0.0
+                sleep(5.0)
+                self.ctrl.vessel.auto_pilot.disengage()
+                self.ctrl.vessel.auto_pilot.sas = True
+                break
 
                 # if dist < suicide_burn_start_alt:
                 #     if surf_vertical_speed < -5.0:

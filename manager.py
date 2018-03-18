@@ -7,7 +7,7 @@ from functools import partial
 # from sympy import Ellipse, Circle, Point
 import sympy
 
-from util import get_pitch_heading, unit_vector, engine_is_active
+from util import get_pitch_heading, unit_vector, engine_is_active, to_min_sec_str
 
 
 class BasicPoint(object):
@@ -109,6 +109,7 @@ class PitchManager(Manager):
 
     def run(self):
         while True:
+            # sleep(0.05)
             vessel = self.ctrl.vessel
             follow = self.ctrl.pitch_follow
 
@@ -147,8 +148,6 @@ class PitchManager(Manager):
                 vessel.auto_pilot.target_pitch_and_heading(pitch, heading)
                 # vessel.auto_pilot.target_direction = velocity_direction
                 # vessel.auto_pilot.target_pitch_and_heading(pitch, 90 + heading_error)
-
-
                 # vessel.auto_pilot.reference_frame = vessel.surface_velocity_reference_frame
                 # vessel.auto_pilot.target_direction = (0, -1, 0)
 
@@ -639,7 +638,7 @@ class BurnManager(Manager):
     def _get_burn_start(self):
         if not self._burn_times:
             self._burn_times = self._get_burn_times(self._get_burn_dv())
-        self.burn_start = self._get_burn_point() - self._get_burn_time() * 0.4
+        self.burn_start = self._get_burn_point() - self._get_burn_time() * 0.45
         return self.burn_start
 
     def _get_burn_time(self):
@@ -702,8 +701,8 @@ class StagingManager(object):
 
 
 class ImpactManager(Manager):
-    _semi_major_axis = 0.0
-    _semi_minor_axis = 0.0
+    _semi_major_axis = 0.001
+    _semi_minor_axis = 0.001
     # _linear_eccentricity = 0.0
     # _radius_pariapsis = 0.0
     # _radius_apoapsis = 0.0
@@ -735,8 +734,6 @@ class ImpactManager(Manager):
         # self.integral_func = I(sqrt(D(a * cos(t), t, evaluate=True) ** 2 + D(b * sin(t), t, evaluate=True) ** 2), (t, tmin, tmax))
 
     def run(self):
-        self.init_vars()
-
         def svg(e, stroke_width=1., color="#000", fill_color="transparent"):
             return (
                 '<ellipse stroke="{}" fill="{}" stroke-width="{}"'
@@ -750,6 +747,7 @@ class ImpactManager(Manager):
             sleep(1.0)
 
             if all([self.ellipse, self.circle]):
+                # self.init_vars()
 
                 POINT_SIZE = self.circle.hradius*0.05
                 STROKE_WIDTH = self.circle.hradius * 0.025
@@ -762,7 +760,7 @@ class ImpactManager(Manager):
                 y1 = min(int(-self.ellipse.vradius * 1.25), int(-self.circle.vradius * 1.25))
                 x2 = int(self.ellipse.hradius * 1.25 * 2)
                 y2 = max(int(self.ellipse.vradius * 1.25), int(self.circle.vradius * 1.25)) + math.fabs(y1)
-                lines.append('<svg viewBox="{} {} {} {}" style="width: 80%">'.format(x1, y1, x2, y2))
+                lines.append('<svg viewBox="{} {} {} {}" style="max-height: 800px; max-width: 80%">'.format(x1, y1, x2, y2))
                 lines.append(svg(self.ellipse, stroke_width=STROKE_WIDTH))
                 lines.append(svg(self.circle, stroke_width=STROKE_WIDTH))
                 lines.append(svg(BasicCircle(center=self.focii, r=POINT_SIZE), color='#0000FF', fill_color='#0000FF'))
@@ -852,13 +850,48 @@ class ImpactManager(Manager):
                 print 'file created'
                 sleep(5.0)
 
-    def calc_suicide_burn_radius(self, initial_velocity, impact_pos):
-        mi = self.ctrl.mass
-        g = self.ctrl.surface_gravity
-        thrust = self.ctrl.available_thrust
-        accel = thrust / mi - g
-        dist_to_stop = (initial_velocity ** 2.0) / (2.0 * accel)
-        return self.calc_radius(pos=impact_pos) + dist_to_stop
+    def calc_time_for_speed_dist(self, vi, vf, dist):
+        # dist = (vf + vi)/2 * t
+        # t = (dist * 2) / (vf + vi)
+        return (dist * 2.0) / (vf + vi)
+
+    def calc_time(self, mean_anomaly=None):
+        mean_anomaly_at_epoch = self.ctrl.mean_anomaly_at_epoch
+        epoch = self.ctrl.epoch
+        period = self.ctrl.period
+        # mean_anomaly = mean_anomaly_at_epoch + (0.005 / period) * (2 * math.pi)
+        # mean_anomaly - mean_anomaly_at_epoch = (0.005 / period) * (2 * math.pi)
+        # (mean_anomaly - mean_anomaly_at_epoch) / (2 * math.pi) = (0.005 / period)
+        return epoch + period * (mean_anomaly - mean_anomaly_at_epoch) / (2 * math.pi)
+
+    def approximate_speed(self, pos=None, radius=None, true_anomaly=None, mean_anomaly=None, eccentric_anomaly=None):
+        if mean_anomaly is None:
+            mean_anomaly = self.calc_mean_anomaly(pos=pos, radius=radius, true_anomaly=true_anomaly, eccentric_anomaly=eccentric_anomaly)
+
+        period = self.ctrl.period
+
+        # measure 0.005 before and after to determine m/s
+        start_mean = mean_anomaly - (0.005 / period) * (2 * math.pi)
+        end_mean = mean_anomaly + (0.005 / period) * (2 * math.pi)
+
+        start_pos = self.calc_pos(mean_anomaly=start_mean)
+        end_pos = self.calc_pos(mean_anomaly=end_mean)
+
+        # 1.00 sec -> spd: 765.014180829 m/s
+        # 0.10 sec -> spd: 765.013805252 m/s
+        # 0.01 sec -> spd: 765.013801514 m/s
+        #             spd: 765.013793762
+        # diff between .distance() and .approximate_distance() in testing seems to be 0.000000002 m/s ... :)
+        #     close enough i figure... :)
+        return start_pos.distance(end_pos) * 100
+
+    # def calc_suicide_burn_radius(self, initial_velocity, impact_pos):
+    #     mi = self.ctrl.mass
+    #     g = self.ctrl.surface_gravity
+    #     thrust = self.ctrl.available_thrust
+    #     accel = thrust / mi - g
+    #     dist_to_stop = (initial_velocity ** 2.0) / (2.0 * accel)
+    #     return self.calc_radius(pos=impact_pos) + dist_to_stop
 
     def approximate_distance(self,
         pos_1=None, true_anomaly_1=None,
@@ -900,6 +933,7 @@ class ImpactManager(Manager):
         self._approx_points = []
         self._approx_points.append(start_point)
 
+        # radius won't work well for almost circular orbits...
         n = float(n+1)
         for i in reversed(range(1, int(n))):
             # Speed is important here
@@ -1001,24 +1035,50 @@ class ImpactManager(Manager):
 
     def calc_true_anomaly(self, pos=None, radius=None):
         assert pos or radius
-        if pos:
+        if pos is not None:
             x_to_p = float(pos.distance(self.periapsis))
             x_to_f = float(pos.distance(self.focii))
-            p_to_f = self.ctrl.semi_major_axis - self.ctrl.linear_eccentricity
-            return math.acos((x_to_f ** 2 + p_to_f ** 2 - x_to_p ** 2) / (2.0 * x_to_f * p_to_f)) - math.pi
+            p_to_f = self._semi_major_axis - self._linear_eccentricity
+            pos_cos = (x_to_f ** 2 + p_to_f ** 2 - x_to_p ** 2) / (2.0 * x_to_f * p_to_f)
+            if math.fabs(pos_cos) > 1.0:
+                print 'DOMAIN ERROR: ', pos_cos
+                pos_cos = float(int(pos_cos))
+            return math.acos(pos_cos) - math.pi
         else:
+            # TODO: using cached but we should use the same everywhere ... was causing drift issues it seems at low orbit
             a = self.ctrl.semi_major_axis
             e = self.ctrl.eccentricity
             return -math.acos((-a * e ** 2 + a - radius) / (e * radius))
 
-    def calc_eccentric_anomaly(self, mean_anomaly):
-        E, M = mean_anomaly, mean_anomaly
+    def calc_mean_anomaly(self, pos=None, radius=None, true_anomaly=None, eccentric_anomaly=None, time_offset=None):
+        assert pos or radius or true_anomaly or eccentric_anomaly
         e = self.ctrl.eccentricity
-        while True:
-            dE = (E - e * math.sin(E) - M) / (1.0 - e * math.cos(E))
-            E -= dE
-            if math.fabs(dE) < 1e-12:
-                break
+        if eccentric_anomaly is None:
+            if true_anomaly is None:
+                true_anomaly = self.calc_true_anomaly(pos=pos, radius=radius)
+            eccentric_anomaly = self.calc_eccentric_anomaly(true_anomaly=true_anomaly)
+        output = eccentric_anomaly - e * math.sin(eccentric_anomaly)
+        if time_offset is not None:
+            mean_anomaly = output
+            period = self.ctrl.period
+            output = mean_anomaly + (time_offset / period) * (2 * math.pi)
+        return output
+
+    def calc_eccentric_anomaly(self, mean_anomaly=None, true_anomaly=None):
+        e = self.ctrl.eccentricity
+
+        if mean_anomaly is not None:
+            E, M = mean_anomaly, mean_anomaly
+            # print 'mean anom: ', M
+            while True:
+                # print 'E: ', E
+                dE = (E - e * math.sin(E) - M) / (1.0 - e * math.cos(E))
+                E -= dE
+                if math.fabs(dE) < 1e-12:
+                    break
+        else:
+            E = math.atan2(math.sqrt(1 - e ** 2) * math.sin(true_anomaly), e + math.cos(true_anomaly))
+            # E = math.atan2(e + math.cos(true_anomaly), math.sqrt(1 - e ** 2) * math.sin(true_anomaly))
         return E
 
     def calc_pos(self, orbit=None, radius=None, true_anomaly=None, mean_anomaly=None, eccentric_anomaly=None):
@@ -1133,6 +1193,9 @@ class ImpactManager(Manager):
         semi_minor = self.ctrl.semi_minor_axis
         semi_major_diff = (max(self._semi_major_axis, semi_major) - min(self._semi_major_axis, semi_major)) / max(self._semi_major_axis, semi_major)
         semi_minor_diff = (max(self._semi_minor_axis, semi_minor) - min(self._semi_minor_axis, semi_minor)) / max(self._semi_minor_axis, semi_minor)
+        # print 'mja: {} | {}'.format(semi_major, self._semi_major_axis)
+        # print 'mna: {} | {}'.format(semi_minor, self._semi_minor_axis)
+        # print 'mj: {} mn: {}'.format(semi_major_diff, semi_minor_diff)
         invalid = semi_major_diff > self.DIFF_THRESHOLD or semi_minor_diff > self.DIFF_THRESHOLD
         if invalid:
             print 'Invalid semi major / minor axis'
@@ -1142,11 +1205,10 @@ class ImpactManager(Manager):
     def init_vars(self):
         self._semi_major_axis = self.ctrl.semi_major_axis
         self._semi_minor_axis = self.ctrl.semi_minor_axis
-        linear_eccentricity = math.sqrt(self._semi_major_axis**2 - self._semi_minor_axis**2)
-        radius_pariapsis = self._semi_major_axis - linear_eccentricity
-        radius_apoapsis = 2 * self._semi_major_axis - linear_eccentricity
-        # self._eccentricity = 1.0 - (2.0 / ((self._radius_apoapsis/self._radius_pariapsis) + 1.0))
-        # self._eccentricity = math.sqrt(1.0 - (self._semi_minor_axis / self._semi_major_axis)**2.0)
+        self._linear_eccentricity = math.sqrt(self._semi_major_axis**2 - self._semi_minor_axis**2)
+        radius_pariapsis = self._semi_major_axis - self._linear_eccentricity
+        radius_apoapsis = 2 * self._semi_major_axis - self._linear_eccentricity
+        self._eccentricity = math.sqrt(1.0 - (self._semi_minor_axis / self._semi_major_axis)**2.0)
         # self._longitude_of_ascending_node = self.ctrl.longitude_of_ascending_node
         # self._argument_of_periapsis = self.ctrl.argument_of_periapsis
 
@@ -1159,7 +1221,7 @@ class ImpactManager(Manager):
         self.apoapsis = BasicPoint(radius_apoapsis, 0)
         # self.true_anomaly = self.ctrl.true_anomaly
         # self.focii = BasicPoint(0, 0)
-        self.ellipse = sympy.Ellipse(sympy.Point(linear_eccentricity, 0), self._semi_major_axis, self._semi_minor_axis)
+        self.ellipse = sympy.Ellipse(sympy.Point(self._linear_eccentricity, 0), self._semi_major_axis, self._semi_minor_axis)
         self.circle = sympy.Circle(sympy.Point(0, 0), self.ctrl.equatorial_radius)
 
         # a, b, t, tmin, tmax = self.integral_symbols
